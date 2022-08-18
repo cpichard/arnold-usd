@@ -1,0 +1,7 @@
+Instanceable prim as prototype of PointInstancer in Maya
+
+See #1262
+
+author: cyril.pichard
+
+PARAMS: {'scene':'test.usda', 'resaved':'ass'}

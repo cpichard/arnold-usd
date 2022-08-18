@@ -1,0 +1,79 @@
+#usda 1.0
+
+def PointInstancer "points"
+{
+    point3f[] positions = [(10, 0, 0), (20, 0, 0), (30, 0, 0), (40, 0, 0), (50, 0, 0), (60, 0, 0), (70, 0, 0), (80, 0, 0)]
+    int[] protoIndices = [0, 0, 0, 0, 0, 0, 0, 0]
+    rel prototypes = </points/Prototype>
+
+    def Scope "Prototype" (
+        instanceable = true
+        references = @./cube.usda@</MASTER>
+    )
+    {
+    }
+}
+
+def Xform "Cameras"
+{
+    float3 xformOp:rotateXYZ = (-0, 27.859081, -0)
+    float3 xformOp:scale = (1.0345297, 1, 1.0753477)
+    double3 xformOp:translate = (76.15346552731278, 18.538523773325473, 63.021642875943414)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+    def Camera "cam1"
+    {
+        float4[] clippingPlanes.timeSamples = {
+            1: [],
+        }
+        float2 clippingRange.timeSamples = {
+            1: (1, 1000000),
+        }
+        float focalLength = 10
+        float focalLength.timeSamples = {
+            1: 20,
+        }
+        float focusDistance.timeSamples = {
+            1: 0.5190141,
+        }
+        float fStop.timeSamples = {
+            1: 0,
+        }
+        float horizontalAperture.timeSamples = {
+            1: 20.955,
+        }
+        float horizontalApertureOffset.timeSamples = {
+            1: 0,
+        }
+        token projection.timeSamples = {
+            1: "perspective",
+        }
+        float verticalAperture.timeSamples = {
+            1: 13.788235,
+        }
+        float verticalApertureOffset.timeSamples = {
+            1: 0,
+        }
+        matrix4d xformOp:transform.timeSamples = {
+            1: ( (0.9660339771478493, 9.71445146547012e-16, -0.03245415221203268, 0), (-0.004694955827641775, 0.9902680687415705, -0.12934265390247968, 0), (0.0334063465439271, 0.13917310096006455, 0.9203208033905298, 0), (0.017338365557662883, 0.07223280453631631, 0.15585260291592817, 1) ),
+        }
+        uniform token[] xformOpOrder = ["xformOp:transform"]
+    }
+}
+
+def RectLight "Lights"
+{
+    float inputs:height = 1000
+    float inputs:intensity = 1
+    float inputs:width = 1000
+    float3 xformOp:rotateXYZ = (-22.459888, -0, -0)
+    double3 xformOp:translate = (43.67198066581791, 25.893954846544048, 50.597504478174535)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+}
+
+def Sphere "ControlSphere"
+{
+    color3f[] primvars:displayColor = [(0, 1, 0)]
+    double radius = 2
+}
+
