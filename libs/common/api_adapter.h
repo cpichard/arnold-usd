@@ -8,7 +8,8 @@
 #include <pxr/usd/usdGeom/primvar.h>
 #include "constant_strings.h"
 
-#include <ai.h>
+#include <ai_nodes.h>
+#include <ai_universe.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
 

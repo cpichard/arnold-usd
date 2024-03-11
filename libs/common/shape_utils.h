@@ -26,7 +26,7 @@
 
 #include <pxr/base/arch/export.h>
 
-#include <ai.h>
+#include <ai_universe.h>
 PXR_NAMESPACE_OPEN_SCOPE
 
 /// Read subdivision creases from a Usd or a Hydra mesh.

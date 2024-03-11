@@ -17,7 +17,9 @@
 // limitations under the License.
 #pragma once
 
-#include <ai.h>
+#include <ai_nodes.h>
+#include <ai_universe.h>
+#include <ai_critsec.h>
 
 #include <pxr/base/work/dispatcher.h>
 #include <pxr/usd/usd/prim.h>

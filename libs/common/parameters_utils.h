@@ -6,7 +6,7 @@
 
 #include "api_adapter.h"
 #include <pxr/usd/usd/prim.h>
-#include <ai.h>
+#include <ai_universe.h>
 #include <string>
 #include "timesettings.h"
 #include "api_adapter.h"

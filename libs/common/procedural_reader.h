@@ -3,7 +3,8 @@
 //
 
 #pragma once
-#include <ai.h>
+#include <ai_universe.h>
+#include <ai_procedural.h>
 #include <pxr/usd/usd/stage.h>
 
 PXR_NAMESPACE_USING_DIRECTIVE
