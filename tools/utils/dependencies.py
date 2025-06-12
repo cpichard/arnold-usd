@@ -124,6 +124,8 @@ def usd_imaging_plugin(env, sources):
     ]
     if env['USD_VERSION_INT'] >= 2411:
         usd_libs += ['boost','python',]
+    if env['USD_VERSION_INT'] >= 2505:
+        usd_libs += ['ts',]
     return add_plugin_deps(env, sources, usd_libs, True)
 
 def scene_delegate(env, sources):
