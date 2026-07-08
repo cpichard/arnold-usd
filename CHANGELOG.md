@@ -24,8 +24,13 @@
 - [usd#2628](https://github.com/Autodesk/arnold-usd/issues/2628) - Fix crash happening after changing the purpose in hydra
 - [usd#2621](https://github.com/Autodesk/arnold-usd/issues/2621) - Fix invalid null shader being authored to USD from Maya
 
+## [7.5.2.1] (Unreleased)
 
-## [7.5.2.0] (Unreleased)
+### Bug Fixes
+
+- [usd#2707](https://github.com/Autodesk/arnold-usd/issues/2707) - MeshLightAPI parameters are not read properly
+
+## [7.5.2.0] 2026-06-18
 
 ### Features
 
@@ -41,6 +46,9 @@
 - [usd#2439](https://github.com/Autodesk/arnold-usd/issues/2439) - Support shaping attributes in all lights
 - [usd#2477](https://github.com/Autodesk/arnold-usd/issues/2477) - Support IES profiles on any light
 
+### Bug Fixes
+
+- [usd#2695](https://github.com/Autodesk/arnold-usd/issues/2695) - Fix MaterialX boolean shaders through USD
 
 ## [7.5.1.2] (Unreleased)
 
