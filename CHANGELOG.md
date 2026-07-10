@@ -24,6 +24,7 @@
 - [usd#2695](https://github.com/Autodesk/arnold-usd/issues/2695) - Fix MaterialX boolean shaders through USD
 - [usd#2628](https://github.com/Autodesk/arnold-usd/issues/2628) - Fix crash happening after changing the purpose in hydra
 - [usd#2621](https://github.com/Autodesk/arnold-usd/issues/2621) - Fix invalid null shader being authored to USD from Maya
+- [usd#2699](https://github.com/Autodesk/arnold-usd/issues/2699) - Fix primvars:crypto_asset being ignored on instanceable references
 
 ## [7.5.2.1] (Unreleased)
 
