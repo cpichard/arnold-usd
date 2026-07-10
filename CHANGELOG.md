@@ -5,6 +5,7 @@
 
 ### Features
 
+- [usd#2706](https://github.com/Autodesk/arnold-usd/issues/2706) - Fix overscan 1-pixel offset with certain resolutions
 - [usd#2698](https://github.com/Autodesk/arnold-usd/issues/2698) - Author upAxis and meterUnit metadatas in the writer
 - [usd#2625](https://github.com/Autodesk/arnold-usd/issues/2625) - Add turntable command line tool generating turntable scenes from a usd asset.
 - [usd#1286](https://github.com/Autodesk/arnold-usd/issues/1286) - Support UV RenderVars
@@ -12,6 +13,7 @@
 - [usd#2687](https://github.com/Autodesk/arnold-usd/issues/2687) - Support double-precision primvars
 - [usd#2691](https://github.com/Autodesk/arnold-usd/issues/2691) - Support mesh normals updates interactively
 - [usd#2686](https://github.com/Autodesk/arnold-usd/issues/2686) - Prevent subdivisionScheme from being written as timeSamples in USD export
+- [usd#2712](https://github.com/Autodesk/arnold-usd/pull/2712) - Add env variable HDARNOLD_FLATTEN_INSTANCING to flatten the nested instancers
 
 ### Bug Fixes
 
@@ -21,8 +23,15 @@
 - [usd#2641](https://github.com/Autodesk/arnold-usd/issues/2641) - Animate instanced lights driven by an animated Point Instancer in Hydra
 - [usd#2695](https://github.com/Autodesk/arnold-usd/issues/2695) - Fix MaterialX boolean shaders through USD
 - [usd#2628](https://github.com/Autodesk/arnold-usd/issues/2628) - Fix crash happening after changing the purpose in hydra
+- [usd#2621](https://github.com/Autodesk/arnold-usd/issues/2621) - Fix invalid null shader being authored to USD from Maya
 
-## [7.5.2.0] (Unreleased)
+## [7.5.2.1] (Unreleased)
+
+### Bug Fixes
+
+- [usd#2707](https://github.com/Autodesk/arnold-usd/issues/2707) - MeshLightAPI parameters are not read properly
+
+## [7.5.2.0] 2026-06-18
 
 ### Features
 
@@ -38,6 +47,9 @@
 - [usd#2439](https://github.com/Autodesk/arnold-usd/issues/2439) - Support shaping attributes in all lights
 - [usd#2477](https://github.com/Autodesk/arnold-usd/issues/2477) - Support IES profiles on any light
 
+### Bug Fixes
+
+- [usd#2695](https://github.com/Autodesk/arnold-usd/issues/2695) - Fix MaterialX boolean shaders through USD
 
 ## [7.5.1.2] (Unreleased)
 
