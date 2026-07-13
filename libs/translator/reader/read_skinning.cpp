@@ -463,7 +463,7 @@ _SkelAdapter::_SkelAdapter(const UsdSkelSkeletonQuery& skelQuery,
 
     if (const UsdSkelSkeleton& skel = skelQuery.GetSkeleton()) {
         const auto& animQuery = skelQuery.GetAnimQuery();
-        if ((animQuery && !skelQuery.GetMapper().IsNull()) ||
+        if ((animQuery && !skelQuery.GetJointMapper().IsNull()) ||
             skel.GetRestTransformsAttr().HasAuthoredValue()) {
 
             // XXX: Activate computations, but tag them as not required;
