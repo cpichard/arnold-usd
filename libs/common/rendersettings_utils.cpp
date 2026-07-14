@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include <cmath>
 #include <unordered_set>
 #include <vector>
 #include "rendersettings_utils.h"
@@ -89,7 +90,8 @@ ArnoldAOVTypes GetArnoldTypesFromFormatToken(const TfToken &type)
         return {"FLOAT", str::aov_write_float, str::user_data_float, true};
     } else if (type == _tokens->_float) {
         return {"FLOAT", str::aov_write_float, str::user_data_float, false};
-    } else if (type == _tokens->_int || type == _tokens->i8 || type == _tokens->uint8) {
+    } else if (type == _tokens->_int || type == _tokens->i8 || type == _tokens->int8 ||
+               type == _tokens->ui8 || type == _tokens->uint8) {
         return {"INT", str::aov_write_int, str::user_data_int, false};
     } else if (type == _tokens->half2 || type == _tokens->color2h) {
         return {"VECTOR2", str::aov_write_vector, str::user_data_rgb, true};
@@ -309,7 +311,7 @@ AtNode * DeduceDriverFromFilename(const UsdRenderProduct &renderProduct, ArnoldA
     }
 
     // Get the proper driver type based on the file extension
-    if (extension == "tif")
+    if (extension == "tif" || extension == "tiff")
         driverType = "driver_tiff";
     else if (extension == "jpg" || extension == "jpeg")
         driverType = "driver_jpeg";
@@ -482,23 +484,25 @@ void SetRegion(AtNode* options, const GfVec4f& windowNDC, const GfVec2i& resolut
         (!GfIsClose(windowNDC[1], 0.0f, AI_EPSILON)) || 
         (!GfIsClose(windowNDC[2], 1.0f, AI_EPSILON)) || 
         (!GfIsClose(windowNDC[3], 1.0f, AI_EPSILON))) {
-        // Need to invert the window range in the Y axis
-        GfVec4f adjustedWindow = windowNDC;
-        float minY = 1. - adjustedWindow[3];
-        float maxY = 1. - adjustedWindow[1];
-        adjustedWindow[1] = minY;
-        adjustedWindow[3] = maxY;
-
         // Ensure the user isn't setting invalid ranges
+        GfVec4f adjustedWindow = windowNDC;
         if (adjustedWindow[0] > adjustedWindow[2])
             std::swap(adjustedWindow[0], adjustedWindow[2]);
         if (adjustedWindow[1] > adjustedWindow[3])
             std::swap(adjustedWindow[1], adjustedWindow[3]);
-        
-        AiNodeSetInt(options, str::region_min_x, int(adjustedWindow[0] * resolution[0]));
-        AiNodeSetInt(options, str::region_min_y, int(adjustedWindow[1] * resolution[1]));
-        AiNodeSetInt(options, str::region_max_x, int(adjustedWindow[2] * resolution[0]) - 1);
-        AiNodeSetInt(options, str::region_max_y, int(adjustedWindow[3] * resolution[1]) - 1);
+
+        // Snap the NDC window to integer pixel coordinates with ceil, matching the convention
+        // used by Houdini (SYSceil in XUSD_RenderSettings::computeImageWindows) and by the
+        // render delegate in HdArnoldRenderPass::_Execute, so that all code paths place the
+        // data window on the same pixels. The Y snapping must happen in the original y-up NDC
+        // space with the same float expressions before flipping into Arnold's y-down region,
+        // as float precision errors can round differently in the two spaces.
+        const int yMinUp = std::ceil(adjustedWindow[1] * resolution[1]);
+        const int yMaxUp = std::ceil(adjustedWindow[3] * resolution[1] - 1);
+        AiNodeSetInt(options, str::region_min_x, int(std::ceil(adjustedWindow[0] * resolution[0])));
+        AiNodeSetInt(options, str::region_max_x, int(std::ceil(adjustedWindow[2] * resolution[0] - 1)));
+        AiNodeSetInt(options, str::region_min_y, resolution[1] - 1 - yMaxUp);
+        AiNodeSetInt(options, str::region_max_y, resolution[1] - 1 - yMinUp);
     }
 }
 
@@ -624,7 +628,12 @@ AtNode* ReadRenderSettings(const UsdPrim &renderSettingsPrim, ArnoldAPIAdapter &
             if (filterAttr) {
                 VtValue filterValue;
                 if (filterAttr.Get(&filterValue, time.frame)) {
-                    filterType = VtValueGetString(filterValue);
+                    // Only override the default filter type if a non-empty value
+                    // was authored. An empty "arnold:filter" would otherwise clobber
+                    // the box_filter fallback and create an invalid node.
+                    std::string filterStr = VtValueGetString(filterValue);
+                    if (!filterStr.empty())
+                        filterType = filterStr;
                 }
             }
 
@@ -632,7 +641,11 @@ AtNode* ReadRenderSettings(const UsdPrim &renderSettingsPrim, ArnoldAPIAdapter &
             AtNode *filter = AiNodeLookUpByName(universe, AtString(filterName.c_str()));
             if (filter == nullptr)
                 filter = context.CreateArnoldNode(filterType.c_str(), filterName.c_str());
-            
+            // An unknown/invalid filter type returns a null node. Skip this
+            // RenderVar rather than dereferencing it below.
+            if (filter == nullptr)
+                continue;
+
             // Set the filter width if the attribute exists in this filter type
             if (AiNodeEntryLookUpParameter(AiNodeGetNodeEntry(filter), str::width)) {
                 // An eventual attribute "arnold:width" will determine the filter width attribute
@@ -716,14 +729,25 @@ AtNode* ReadRenderSettings(const UsdPrim &renderSettingsPrim, ArnoldAPIAdapter &
                 // Set the name of the AOV that needs to be filled
                 AiNodeSetStr(aovShader, str::aov_name, AtString(aovName.c_str()));
 
-                // Create a user data shader that will read the desired primvar, its type depends on the AOV type
-                std::string userDataName = renderVarPrim.GetPath().GetText() + std::string("/user_data");
-                AtNode *userData = context.CreateArnoldNode(arnoldTypes.userData, userDataName.c_str());
-                // Link the user_data to the aov_write
-                AiNodeLink(userData, "aov_input", aovShader);
-                // Set the user data (primvar) to read
-                AiNodeSetStr(userData, str::attribute, AtString(sourceName.c_str()));
-                // We need to add the aov shaders to options.aov_shaders. 
+                // The reader is normally a user_data_* shader that looks up a primvar.
+                // "st" and "uv" are special: UVs are stored as built-in geometry data in
+                // arnold rather than as user data, so user_data_* would return zeros.
+                // Use a utility shader in uv color_mode instead, matching the Hydra render
+                // pass behaviour (see HdArnoldRenderPass _CreateAOV).
+                std::string readerName = renderVarPrim.GetPath().GetText() + std::string("/user_data");
+                AtNode *reader = nullptr;
+                if (sourceName == "st" || sourceName == "uv") {
+                    reader = context.CreateArnoldNode(str::utility.c_str(), readerName.c_str());
+                    AiNodeSetStr(reader, str::color_mode, str::uv);
+                    AiNodeSetStr(reader, str::shade_mode, str::flat);
+                } else {
+                    reader = context.CreateArnoldNode(arnoldTypes.userData, readerName.c_str());
+                    // Set the user data (primvar) to read
+                    AiNodeSetStr(reader, str::attribute, AtString(sourceName.c_str()));
+                }
+                // Link the reader to the aov_write
+                AiNodeLink(reader, "aov_input", aovShader);
+                // We need to add the aov shaders to options.aov_shaders.
                 // Each of these shaders will be evaluated for every camera ray
                 aovShaders.push_back(aovShader);
             }

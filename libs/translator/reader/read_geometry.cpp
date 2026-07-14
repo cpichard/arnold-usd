@@ -205,6 +205,28 @@ static inline void _ReadMeshLight(const UsdPrim &prim, UsdArnoldReaderContext &c
             ReadLightNormalize(prim, meshLightNode, time);
             ReadLightShapingParams(prim, meshLightNode, time, false);
             ReadMatrix(prim, meshLightNode, time, context);
+            // Apply arnold:light:* primvars (same as the primvars:arnold:light path)
+            ReadArnoldParameters(prim, context, meshLightNode, time, "primvars:arnold:light");
+            ReadLightShaders(prim, prim.GetAttribute(_tokens->PrimvarsArnoldLightShaders), meshLightNode, context);
+            // Apply bare arnold:attr_name primvars if attr_name exists in the mesh_light node entry
+            {
+                const AtNodeEntry *nentry = AiNodeGetNodeEntry(meshLightNode);
+                const static std::string s_lightPrefix = "arnold:light:";
+                const static std::string s_arnoldPrefix = "arnold:";
+                for (const UsdGeomPrimvar &primvar : context.GetPrimvars()) {
+                    const std::string primvarName = primvar.GetPrimvarName().GetString();
+                    if (primvarName.length() > s_arnoldPrefix.length() &&
+                        TfStringStartsWith(primvarName, s_arnoldPrefix) &&
+                        !TfStringStartsWith(primvarName, s_lightPrefix) &&
+                        primvarName != "arnold:matrix") {
+                        const std::string paramName = primvarName.substr(s_arnoldPrefix.length());
+                        const AtParamEntry *paramEntry = AiNodeEntryLookUpParameter(nentry, AtString(paramName.c_str()));
+                        if (paramEntry) {
+                            ReadAttribute(primvar.GetAttr(), meshLightNode, paramName, time, context, AiParamGetType(paramEntry));
+                        }
+                    }
+                }
+            }
         }
 #endif
     }
@@ -286,13 +308,18 @@ bool MeshOrientation::OrientFaceIndexAttribute(T& attr)
 class MeshPrimvarsRemapper : public PrimvarsRemapper
 {
 public:
-    MeshPrimvarsRemapper(MeshOrientation &orientation) : _orientation(orientation) {}
+    MeshPrimvarsRemapper(MeshOrientation &orientation) : _orientation(orientation), _holeFilter(nullptr) {}
+    MeshPrimvarsRemapper(MeshOrientation &orientation, const MeshHoleFilter *holeFilter)
+        : _orientation(orientation), _holeFilter(holeFilter) {}
     virtual ~MeshPrimvarsRemapper() {}
     bool ReadPrimvar(const TfToken& primvar) override;  
+    bool RemapValues(const UsdGeomPrimvar &primvar, const TfToken &interpolation, 
+        VtValue &value) override;
     bool RemapIndexes(const UsdGeomPrimvar &primvar, const TfToken &interpolation, 
         std::vector<unsigned int> &indexes) override;
 private:
     MeshOrientation &_orientation;
+    const MeshHoleFilter *_holeFilter;
 };
 bool MeshPrimvarsRemapper::ReadPrimvar(const TfToken& primvar)
 {
@@ -302,11 +329,31 @@ bool MeshPrimvarsRemapper::ReadPrimvar(const TfToken& primvar)
     return true;
 }
 
+bool MeshPrimvarsRemapper::RemapValues(const UsdGeomPrimvar &primvar, const TfToken &interpolation,
+        VtValue &value) 
+{
+    if (_holeFilter == nullptr || _holeFilter->Empty())
+        return false;
+
+    if (interpolation == UsdGeomTokens->uniform) {
+        return _holeFilter->FilterUniformValue(value);
+    }
+    // Face-varying values are NOT filtered here — the index filtering in
+    // RemapIndexes already skips hole-face entries, and the indices still
+    // reference positions in the original (unfiltered) values array.
+    return false;
+}
+
 bool MeshPrimvarsRemapper::RemapIndexes(const UsdGeomPrimvar &primvar, const TfToken &interpolation, 
         std::vector<unsigned int> &indexes) 
 {
     if (interpolation != UsdGeomTokens->faceVarying)
         return false;
+
+    // Filter hole faces from face-varying indices
+    if (_holeFilter != nullptr && !_holeFilter->Empty()) {
+        _holeFilter->FilterFaceVaryingArray(indexes);
+    }
 
     if (!_orientation.OrientFaceIndexAttribute(indexes)) {
         const UsdAttribute &attr = primvar.GetAttr();
@@ -352,35 +399,70 @@ AtNode* UsdArnoldReadMesh::Read(const UsdPrim &prim, UsdArnoldReaderContext &con
             }
         }
     }
-    
-    ReadAttribute(mesh.GetFaceVertexCountsAttr(), node, "nsides", staticTime,
-        context, AI_TYPE_ARRAY, AI_TYPE_BYTE);
 
-    if (!meshOrientation.reverse) {
-        // Basic right-handed orientation, no need to do anything special here
-        ReadAttribute(mesh.GetFaceVertexIndicesAttr(), node, "vidxs", staticTime,
-            context, AI_TYPE_ARRAY, AI_TYPE_UINT);
+    // Read subdivision scheme early — needed to determine hole handling
+    TfToken subdiv;
+    mesh.GetSubdivisionSchemeAttr().Get(&subdiv, time.frame);
+
+    // Read holeIndices for non-subdivided meshes.
+    // USD holeIndices marks faces as invisible (not rendered).
+    // We handle this by removing hole faces from nsides/vidxs entirely.
+    MeshHoleFilter holeFilter;
+    VtIntArray originalNsides; // original nsides; only populated if there are holes
+    if (subdiv == UsdGeomTokens->none) {
+        VtIntArray holeIndices;
+        mesh.GetHoleIndicesAttr().Get(&holeIndices, frame);
+        if (!holeIndices.empty()) {
+            mesh.GetFaceVertexCountsAttr().Get(&originalNsides, frame);
+            holeFilter.Build(holeIndices, originalNsides);
+        }
+    }
+
+    if (!holeFilter.Empty()) {
+        // Filter nsides: exclude hole faces
+        VtIntArray filteredNsides = originalNsides;
+        holeFilter.FilterUniformArray(filteredNsides);
+        // Match the non-hole path which uses AI_TYPE_BYTE for nsides.
+        std::vector<uint8_t> nsides_byte(filteredNsides.begin(), filteredNsides.end());
+        AiNodeSetArray(node, str::nsides, AiArrayConvert(nsides_byte.size(), 1, AI_TYPE_BYTE, nsides_byte.data()));
+
+        // Filter vidxs: exclude vertex indices belonging to hole faces
+        VtIntArray allVidxs;
+        mesh.GetFaceVertexIndicesAttr().Get(&allVidxs, frame);
+        holeFilter.FilterFaceVaryingArray(allVidxs);
+
+        // Handle left-handed orientation
+        if (meshOrientation.reverse) {
+            meshOrientation.nsidesArray = filteredNsides;
+            meshOrientation.OrientFaceIndexAttribute(allVidxs);
+        }
+
+        std::vector<unsigned int> vidxs_uint(allVidxs.begin(), allVidxs.end());
+        AiNodeSetArray(node, str::vidxs, AiArrayConvert(vidxs_uint.size(), 1, AI_TYPE_UINT, vidxs_uint.data()));
     } else {
-        // We can't call ReadArray here because the orientation requires to
-        // reverse face attributes. So we're duplicating the function here.
-        VtIntArray array;
-        mesh.GetFaceVertexIndicesAttr().Get(&array, frame);
-        size_t size = array.size();
-        if (size > 0) {
-            meshOrientation.OrientFaceIndexAttribute(array);
+        // No holes: use standard attribute reading
+        ReadAttribute(mesh.GetFaceVertexCountsAttr(), node, "nsides", staticTime,
+            context, AI_TYPE_ARRAY, AI_TYPE_BYTE);
 
-            // Need to convert the data from int to unsigned int
-            std::vector<unsigned int> arnold_vec(array.begin(), array.end());
-            AiNodeSetArray(node, str::vidxs, AiArrayConvert(size, 1, AI_TYPE_UINT, arnold_vec.data()));
-        } else
-            AiNodeResetParameter(node, str::vidxs);
+        if (!meshOrientation.reverse) {
+            ReadAttribute(mesh.GetFaceVertexIndicesAttr(), node, "vidxs", staticTime,
+                context, AI_TYPE_ARRAY, AI_TYPE_UINT);
+        } else {
+            VtIntArray array;
+            mesh.GetFaceVertexIndicesAttr().Get(&array, frame);
+            size_t size = array.size();
+            if (size > 0) {
+                meshOrientation.OrientFaceIndexAttribute(array);
+                std::vector<unsigned int> arnold_vec(array.begin(), array.end());
+                AiNodeSetArray(node, str::vidxs, AiArrayConvert(size, 1, AI_TYPE_UINT, arnold_vec.data()));
+            } else
+                AiNodeResetParameter(node, str::vidxs);
+        }
     }
 
     bool hasVelocities = _ReadPointsAndVelocities(mesh, node, str::vlist, context);
 
     // Read USD builtin normals
-    TfToken subdiv;
-    mesh.GetSubdivisionSchemeAttr().Get(&subdiv, time.frame);
     const bool wantNormals = subdiv == UsdGeomTokens->none;
     UsdAttribute normalsAttr = GetNormalsAttribute(mesh);
     if (normalsAttr.HasAuthoredValue() && wantNormals) {
@@ -394,8 +476,8 @@ AtNode* UsdArnoldReadMesh::Read(const UsdPrim &prim, UsdArnoldReaderContext &con
 
         std::vector<GfVec3f> normalsArray;
         std::vector<unsigned int> nidxs; // Flattened array that we are going to pass to arnold
-        normalsArray.reserve(vListKeys*AiArrayGetNumElements(vlistArray));
-        unsigned int normalsElemCount = -1;
+        normalsArray.reserve(vListKeys * (vlistArray ? AiArrayGetNumElements(vlistArray) : 0));
+        unsigned int normalsElemCount = 0;
 
         UsdGeomPrimvar normalsPrimvar(normalsAttr);
         TfToken normalsInterp = GetNormalsInterpolation(mesh);
@@ -463,6 +545,10 @@ AtNode* UsdArnoldReadMesh::Read(const UsdPrim &prim, UsdArnoldReaderContext &con
                     // Fill it with 0, 1, ..., 99.
                     std::iota(std::begin(nidxs), std::end(nidxs), 0);
                 }
+                // Filter out face-varying entries belonging to hole faces
+                if (!holeFilter.Empty()) {
+                    holeFilter.FilterFaceVaryingArray(nidxs);
+                }
                 // If the mesh is left handed we need to reorder the indices
                 if (meshOrientation.reverse) {
                     meshOrientation.OrientFaceIndexAttribute(nidxs);
@@ -484,6 +570,22 @@ AtNode* UsdArnoldReadMesh::Read(const UsdPrim &prim, UsdArnoldReaderContext &con
         VtIntArray faceVtxArray;
         mesh.GetFaceVertexCountsAttr().Get(&faceVtxArray, frame);
         ReadSubsetsMaterialBinding(prim, node, context, subsets, faceVtxArray.size());
+
+        // If holes were removed, the shidxs array has entries for all original faces.
+        // We need to filter it to match the reduced face count.
+        if (!holeFilter.Empty()) {
+            AtArray* shidxsArray = AiNodeGetArray(node, str::shidxs);
+            if (shidxsArray) {
+                const uint32_t numElements = AiArrayGetNumElements(shidxsArray);
+                std::vector<uint8_t> shidxs(numElements);
+                for (uint32_t i = 0; i < numElements; ++i)
+                    shidxs[i] = AiArrayGetByte(shidxsArray, i);
+                if (holeFilter.FilterUniformArray(shidxs)) {
+                    AiNodeSetArray(node, str::shidxs,
+                        AiArrayConvert(shidxs.size(), 1, AI_TYPE_BYTE, shidxs.data()));
+                }
+            }
+        }
     } 
 
     UsdAttribute cornerWeightsAttr = mesh.GetCornerSharpnessesAttr();
@@ -503,7 +605,7 @@ AtNode* UsdArnoldReadMesh::Read(const UsdPrim &prim, UsdArnoldReaderContext &con
         ArnoldUsdReadCreases(node, cornerIndices, cornerWeights, creaseIndices, creaseLengths, creaseWeights);
     }
 
-     MeshPrimvarsRemapper primvarsRemapper(meshOrientation);
+     MeshPrimvarsRemapper primvarsRemapper(meshOrientation, &holeFilter);
     _ReadGenericShape(prim, context, node, time, "primvars:arnold", &primvarsRemapper, subsets.empty());
 
     // Check if subdiv_iterations were set in ReadArnoldParameters,
@@ -918,6 +1020,7 @@ AtNode* UsdArnoldReadGaussianSplat::Read(const UsdPrim &prim, UsdArnoldReaderCon
     // C0 = 0.28209479177387814 (the l=0 SH basis constant).
     // USD radiance:sphericalHarmonicsCoefficients stores raw coefficients;
     // apply the transformation here before building the Arnold atarray.
+    bool gsShSet = false;
     {
         UsdAttribute shAttr;
         bool isFloat = gs.UsesFloatRadianceCoefficients(&shAttr);
@@ -954,7 +1057,25 @@ AtNode* UsdArnoldReadGaussianSplat::Read(const UsdPrim &prim, UsdArnoldReaderCon
                 }
                 AiNodeSetArray(node, str::gs_sh,
                     AiArrayConvert(shCoeffs.size(), 1, AI_TYPE_RGB, shCoeffs.data()));
+                gsShSet = true;
             }
+        }
+    }
+
+    // --- Spherical harmonics fallback: primvars:displayColor ----------------
+    // When Houdini's Bake GSplat SOP creates a ParticleField3DGaussianSplat prim,
+    // it stores the degree-0 splat color in primvars:displayColor instead of
+    // radiance coefficients. When no coefficients are present, use displayColor
+    // as the degree-0 DC term. The values are already the final DC color
+    // (raw_f_dc * C0 + 0.5), so they are passed through directly without normalization.
+    if (!gsShSet) {
+        UsdGeomPrimvarsAPI primvarsAPI(prim);
+        UsdGeomPrimvar displayColorPv = primvarsAPI.GetPrimvar(TfToken("displayColor"));
+        if (displayColorPv) {
+            VtArray<GfVec3f> displayColor;
+            if (displayColorPv.Get(&displayColor, frame) && !displayColor.empty())
+                AiNodeSetArray(node, str::gs_sh,
+                    AiArrayConvert(displayColor.size(), 1, AI_TYPE_RGB, displayColor.cdata()));
         }
     }
 

@@ -212,7 +212,7 @@ bool HdArnoldInstancer::ComputeShapeInstancesTransforms(
     
     HdArnoldSampledPrimvarType sampleArray;
     int instanceCount = ComputeSampleMatrixArrayRecursive(renderDelegate, sampleArray, prototypeId);
-    if (instanceCount == 0)
+    if (instanceCount == 0 || sampleArray.count == 0)
         return false;
 
     AtArray* matrices = _arrayHandler.CreateAtArrayFromTimeSamples<VtArray<GfMatrix4f>>(sampleArray);
@@ -296,7 +296,7 @@ void HdArnoldInstancer::ApplyInstancerVisibilityToArnoldNode(AtNode *node)
 
     VtValue visVal = GetDelegate()->Get(instancerId, _tokens->visibility);
     if (!visVal.IsEmpty()) {
-        AiNodeSetInt(node, str::visibility, VtValueGetInt(visVal));
+        AiNodeSetByte(node, str::visibility, static_cast<uint8_t>(VtValueGetInt(visVal)));
     } else {
         bool assignVisibility = false;
         HdArnoldRayFlags rayFlags{AI_RAY_ALL};
@@ -364,15 +364,23 @@ void HdArnoldInstancer::ComputeSampleMatrixArray(HdArnoldRenderDelegate* renderD
 
 
     // By default _deformKeys will take over sample counts
-    if (sampleArray.count <= 2 && _deformKeys < 2 && _deformKeys > -1 ) { 
+    if (sampleArray.count <= 2 && _deformKeys < 2 && _deformKeys > -1 ) {
         sampleArray.Resize(1);
         sampleArray.times[0] = 0.0;
     } else if (_deformKeys > 1 /*&& _deformKeys > sampleArray.times.size()*/) {
-        const float minTime = *std::min_element(sampleArray.times.begin(), sampleArray.times.end());
-        const float maxTime = *std::max_element(sampleArray.times.begin(), sampleArray.times.end());
-        sampleArray.Resize(_deformKeys);
-        for(int i = 0; i < _deformKeys; ++i) {
-            sampleArray.times[i] = minTime + i * (maxTime - minTime) / (_deformKeys - 1);   
+        // If none of the _AccumulateSampleTimes calls above pushed any sample times into
+        // sampleArray, min/max_element would return end() and we'd UB on dereference.
+        // Fall back to a single key at t=0 in that case.
+        if (sampleArray.times.empty()) {
+            sampleArray.Resize(1);
+            sampleArray.times[0] = 0.0;
+        } else {
+            const float minTime = *std::min_element(sampleArray.times.begin(), sampleArray.times.end());
+            const float maxTime = *std::max_element(sampleArray.times.begin(), sampleArray.times.end());
+            sampleArray.Resize(_deformKeys);
+            for(int i = 0; i < _deformKeys; ++i) {
+                sampleArray.times[i] = minTime + i * (maxTime - minTime) / (_deformKeys - 1);
+            }
         }
     }
     const auto numSamples = sampleArray.count;
@@ -555,9 +563,23 @@ void HdArnoldInstancer::CreateArnoldInstancer(HdArnoldRenderDelegate* renderDele
     HdArnoldSampledMatrixArrayType sampleArray;
     ComputeSampleMatrixArray(renderDelegate, instanceIndices, sampleArray);
 
-    // Implementation with the arnold instancer
+    // Implementation with the arnold instancer.
+    // The arnold instancer node name must be globally unique. A separate chain of arnold
+    // instancer nodes is built per prototype shape (see HdArnoldShape), so when several shapes
+    // share the same (parentInstancer, childInstancer) pair, naming a node solely from those
+    // ids collides. We therefore derive the name from the unique child node we just created.
+    //
+    // Invariant: both callers (HdArnoldShape / HdArnoldLight) clear the instancers vector before
+    // the first call, and the parent recursion below only runs after a node has been pushed, so
+    // an empty vector here means this is the innermost (leaf) call. For the leaf we combine the
+    // instancer id with the prototype (shape) id; for parents we prefix the child node's name,
+    // which is already unique by induction. See NESTED_INSTANCER_CRASHES.md.
     std::stringstream ss;
-    ss << prototypeId << "_instancer";
+    if (instancers.empty()) {
+        ss << instancerId << "_prototype_" << prototypeId << "_instancer";
+    } else {
+        ss << AiNodeGetName(instancers.back()) << "_parent_" << instancerId;
+    }
     AtNode *instancerNode = renderDelegate->CreateArnoldNode(str::instancer, AtString(ss.str().c_str()));
     instancers.push_back(instancerNode);
 
