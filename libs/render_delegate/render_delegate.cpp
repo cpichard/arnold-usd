@@ -53,6 +53,7 @@
 #include "basis_curves.h"
 #include "camera.h"
 #include "config.h"
+#include "coord_sys.h"
 #include "gaussian_splat.h"
 #include "instancer.h"
 #include "light.h"
@@ -263,6 +264,7 @@ inline const TfTokenVector& _SupportedSprimTypes()
     // Scene-index dependency forwarding dirties lights when graphs change but does
     // not reorder this pass.
     static const TfTokenVector r{HdPrimTypeTokens->camera,
+                                 HdPrimTypeTokens->coordSys,
                                  HdPrimTypeTokens->material,
                                  str::t_ArnoldNodeGraph,
                                  HdPrimTypeTokens->distantLight,
@@ -1287,8 +1289,11 @@ HdSprim* HdArnoldRenderDelegate::CreateSprim(const TfToken& typeId, const SdfPat
         DirtyDependency(sprimId);
 
     if (typeId == HdPrimTypeTokens->camera) {
-        return (_mask & AI_NODE_CAMERA) ? 
+        return (_mask & AI_NODE_CAMERA) ?
             new HdArnoldCamera(this, sprimId) : nullptr;
+    }
+    if (typeId == HdPrimTypeTokens->coordSys) {
+        return new HdArnoldCoordSys(this, sprimId);
     }
     if (typeId == HdPrimTypeTokens->material) {
         return (_mask & AI_NODE_SHADER) ? 

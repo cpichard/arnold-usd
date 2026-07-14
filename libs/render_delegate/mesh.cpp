@@ -30,6 +30,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "mesh.h"
+#include "coord_sys.h"
 #include "light.h"
 #include <pxr/base/trace/trace.h>
 
@@ -554,6 +555,31 @@ void HdArnoldMesh::Sync(
         assignMaterials();
     }
 
+    if (*dirtyBits & HdChangeTracker::DirtyCategories) {
+        param.Interrupt();
+        const auto coordSysBindings = sceneDelegate->GetCoordSysBindings(id);
+        if (coordSysBindings && !coordSysBindings->empty()) {
+            auto* coordSysArray = AiArrayAllocate(coordSysBindings->size(), 1, AI_TYPE_NODE);
+            auto** coordSysNodes = static_cast<AtNode**>(AiArrayMap(coordSysArray));
+            size_t count = 0;
+            for (const auto& coordSysId : *coordSysBindings) {
+                const HdSprim* sprim = sceneDelegate->GetRenderIndex().GetSprim(
+                    HdPrimTypeTokens->coordSys, coordSysId);
+                const auto* coordSys = dynamic_cast<const HdArnoldCoordSys*>(sprim);
+                if (coordSys)
+                    coordSysNodes[count++] = coordSys->GetArnoldNode();
+            }
+            AiArrayUnmap(coordSysArray);
+            if (count < coordSysBindings->size())
+                AiArrayResize(coordSysArray, count, 1);
+            if (AiNodeLookUpUserParameter(node, str::coord_sys) == nullptr)
+                AiNodeDeclare(node, str::coord_sys, str::constantArrayNode);
+            AiNodeSetArray(node, str::coord_sys, coordSysArray);
+        } else {
+            AiNodeResetParameter(node, str::coord_sys);
+        }
+    }
+
     SyncShape(*dirtyBits, sceneDelegate, param, transformDirtied);
     
     *dirtyBits = HdChangeTracker::Clean;
@@ -564,7 +590,8 @@ HdDirtyBits HdArnoldMesh::GetInitialDirtyBitsMask() const
     return HdChangeTracker::Clean | HdChangeTracker::InitRepr | HdChangeTracker::DirtyPoints |
            HdChangeTracker::DirtyDisplayStyle | HdChangeTracker::DirtyDoubleSided | HdChangeTracker::DirtySubdivTags |
            HdChangeTracker::DirtyTopology | HdChangeTracker::DirtyTransform | HdChangeTracker::DirtyMaterialId |
-           HdChangeTracker::DirtyPrimvar | HdChangeTracker::DirtyVisibility | HdArnoldShape::GetInitialDirtyBitsMask();
+           HdChangeTracker::DirtyPrimvar | HdChangeTracker::DirtyVisibility | HdChangeTracker::DirtyCategories |
+           HdArnoldShape::GetInitialDirtyBitsMask();
 }
 
 

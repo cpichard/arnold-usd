@@ -1,0 +1,7 @@
+Add support for Hydra coordSys feature
+
+See #32 / ARNOLD-13221
+
+author: cyril.pichard
+
+PARAMS: {'scene':'test.usda', 'kick_params':'-c /Cameras/renderCamera'}
