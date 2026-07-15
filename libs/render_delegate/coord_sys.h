@@ -24,10 +24,22 @@
 
 PXR_NAMESPACE_OPEN_SCOPE
 
+class HdArnoldCamera;
+
 /// HdArnoldCoordSys represents a USD coordinate system binding as an Arnold
-/// matrix_multiply_vector shader node whose matrix tracks the prim's world
-/// transform.  Shaders can connect to its output to transform positions into
-/// the named coordinate space.
+/// camera node whose name matches the coordinate system name (GetName()) and
+/// whose transform tracks the bound prim's world transform.
+///
+/// Arnold's OSL render services resolve named coordinate spaces such as
+/// "map_proj.camera", "map_proj.NDC", "map_proj.screen" and "map_proj.raster"
+/// by looking up a *camera* node named after the space (the portion before the
+/// suffix) via AiNodeLookUpByName. Representing the coordinate system as a
+/// camera named after GetName() is therefore what makes those lookups resolve.
+///
+/// When the coordinate system is bound to a camera prim (the common case, e.g.
+/// a projection camera) we also mirror that camera's frustum (fov, screen
+/// window, clipping) so that the projective ".NDC"/".screen"/".raster" spaces
+/// match the bound camera.
 class HdArnoldCoordSys : public HdCoordSys {
 public:
     HDARNOLD_API
@@ -42,6 +54,10 @@ public:
     AtNode* GetArnoldNode() const { return _node; }
 
 private:
+    /// Returns the HdArnoldCamera the coordinate system is bound to, or nullptr
+    /// when the bound prim is not a camera (or cannot be resolved).
+    const HdArnoldCamera* _FindBoundCamera(HdSceneDelegate* sceneDelegate) const;
+
     HdArnoldRenderDelegate* _renderDelegate;
     AtNode* _node = nullptr;
 };
