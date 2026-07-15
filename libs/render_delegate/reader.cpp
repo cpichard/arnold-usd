@@ -228,10 +228,11 @@ HydraArnoldReader::HydraArnoldReader(AtUniverse *universe, AtNode *procParent) :
 
         _sceneIndex = _displayStyleSceneIndex =
             HdsiLegacyDisplayStyleOverrideSceneIndex::New(_sceneIndex);
-        {
-            std::lock_guard<AtMutex> lock(s_renderIndexCreationMutex);
-            _sceneIndex = HdSceneIndexPluginRegistry::GetInstance().AppendSceneIndicesForRenderer("Arnold", _sceneIndex);
-        }
+        // Note: the Arnold renderer scene-index plugins are applied by
+        // HdRenderIndex itself (at its terminal scene index) for any delegate
+        // with a renderer display name. Applying them again here would run every
+        // plugin twice; harmless for filtering plugins but the coordSys plugin
+        // adds prims, so a second pass produced a duplicate coordSys camera.
         _renderIndex->InsertSceneIndex(_sceneIndex, _sceneDelegateId);
         _stageSceneIndex->SetTime(UsdTimeCode(_time.frame));
 #endif        
