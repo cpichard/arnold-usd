@@ -536,12 +536,10 @@ HydraArnoldReader::_AppendOverridesSceneIndices(
             HdsiPrimTypePruningSceneIndexTokens->bindingToken,
             HdRetainedTypedSampledDataSource<TfToken>::New(
                 HdMaterialBindingsSchema::GetSchemaToken()));
-    // UsdImagingCreateSceneIndices does not turn coordinate-system bindings into
-    // coordSys prims, so add the scene index that does. Without it the render
-    // delegate never receives coordSys sprims in scene-index mode (hydra2) and
-    // named coordinate spaces fail to resolve. This mirrors the coordSys prims
-    // the legacy UsdImagingDelegate adds itself.
-    sceneIndex = HdsiCoordSysPrimSceneIndex::New(sceneIndex);
+    // Note: coordSys prims (needed for named coordinate spaces) are added by the
+    // Arnold renderer scene-index plugin (HdArnoldCoordSysSceneIndexPlugin,
+    // applied below via AppendSceneIndicesForRenderer), so that every Hydra host
+    // gets them, not just the procedural.
 
     // Add a SceneGlobals scene index that we can use to set the render pass, render settings
     // shutter, frame, etc.

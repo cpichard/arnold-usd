@@ -1,5 +1,6 @@
 #usda 1.0
 (
+    defaultPrim = "grid"
     doc = """Exercises Hydra CoordSys support: a texture is projected onto a
              ground plane from the coordinate system 'map_proj', which is bound
              to a tilted projector camera. The MaterialX position node reads its
@@ -7,7 +8,6 @@
              bound camera's OSL space so the projection follows the camera.
 
              See #32 / ARNOLD-13221."""
-    defaultPrim = "grid"
     metersPerUnit = 1
     upAxis = "Y"
 )
@@ -26,24 +26,54 @@ def Xform "grid" (
         float3[] extent = [(-5, 0, -5), (5, 0, 5)]
         int[] faceVertexCounts = [4]
         int[] faceVertexIndices = [0, 1, 2, 3]
-        point3f[] points = [(-5, 0, 5), (5, 0, 5), (5, 0, -5), (-5, 0, -5)]
         rel material:binding = </grid/mtl/projected>
+        point3f[] points = [(-5, 0, 5), (5, 0, 5), (5, 0, -5), (-5, 0, -5)]
         uniform token subdivisionScheme = "none"
     }
 
-    # Projector camera the 'map_proj' coordinate system is bound to. It is tilted
-    # so that its camera space differs clearly from object/world space, making
-    # the projection a meaningful regression signal.
     def Camera "proj_cam"
     {
+        float4[] clippingPlanes.timeSamples = {
+            1: [],
+        }
         float2 clippingRange = (0.1, 10000)
+        float2 clippingRange.timeSamples = {
+            1: (0.1, 10000),
+        }
         float focalLength = 24
+        float focalLength.timeSamples = {
+            1: 24,
+        }
+        float focusDistance.timeSamples = {
+            1: 0.910822,
+        }
+        float fStop.timeSamples = {
+            1: 0,
+        }
         float horizontalAperture = 36
-        float verticalAperture = 27
+        float horizontalAperture.timeSamples = {
+            1: 36,
+        }
+        float horizontalApertureOffset.timeSamples = {
+            1: 0,
+        }
         token projection = "perspective"
-        double3 xformOp:translate = (0, 12, 8)
+        token projection.timeSamples = {
+            1: "perspective",
+        }
+        float verticalAperture = 27
+        float verticalAperture.timeSamples = {
+            1: 27,
+        }
+        float verticalApertureOffset.timeSamples = {
+            1: 0,
+        }
         float xformOp:rotateX = -56
-        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX"]
+        matrix4d xformOp:transform.timeSamples = {
+            1: ( (0.45165629697855614, -4.440892098500626e-16, -0.8921920137501895, 0), (-0.8056142649835146, 0.42972327873219796, -0.40782785556006496, 0), (0.38339567740741387, 0.9029606324284851, 0.19408722479766805, 0), (5.578332355740621, 11.791942779267115, 2.641486272343134, 1) ),
+        }
+        double3 xformOp:translate = (0, 12, 8)
+        uniform token[] xformOpOrder = ["xformOp:transform"]
     }
 
     def Scope "mtl"
@@ -60,10 +90,6 @@ def Xform "grid" (
                 token outputs:out
             }
 
-            # Encode the shaded point's coordinates in the 'map_proj' space as a
-            # smooth colour gradient (R = u, G = v). A smooth ramp keeps the test
-            # robust to sub-pixel differences between the render paths while still
-            # depending entirely on the coordinate system's camera transform.
             def Shader "rgb"
             {
                 uniform token info:id = "ND_combine3_color3"
@@ -77,10 +103,10 @@ def Xform "grid" (
             {
                 uniform token info:id = "ND_range_float"
                 float inputs:in.connect = </grid/mtl/projected/separate.outputs:outx>
-                float inputs:inlow = -5
                 float inputs:inhigh = 5
-                float inputs:outlow = 0
+                float inputs:inlow = -5
                 float inputs:outhigh = 1
+                float inputs:outlow = 0
                 float outputs:out
             }
 
@@ -88,10 +114,10 @@ def Xform "grid" (
             {
                 uniform token info:id = "ND_range_float"
                 float inputs:in.connect = </grid/mtl/projected/separate.outputs:outy>
-                float inputs:inlow = -5
                 float inputs:inhigh = 5
-                float inputs:outlow = 0
+                float inputs:inlow = -5
                 float inputs:outhigh = 1
+                float inputs:outlow = 0
                 float outputs:out
             }
 
@@ -104,9 +130,6 @@ def Xform "grid" (
                 float outputs:outz
             }
 
-            # Reads the shaded point in the 'map_proj' coordinate system. arnold-usd
-            # rewrites the space name to the bound camera's OSL space (map_proj -> the
-            # camera's ".camera" space).
             def Shader "position"
             {
                 uniform token info:id = "ND_position_vector3"
@@ -119,17 +142,16 @@ def Xform "grid" (
 
 def Scope "Cameras"
 {
-    # Top-down view so the whole plane is framed; the projected texture appears
-    # sheared because the projector is oblique.
     def Camera "renderCamera"
     {
         float2 clippingRange = (0.1, 10000)
         float focalLength = 24
         float horizontalAperture = 24
-        float verticalAperture = 18
         token projection = "perspective"
-        double3 xformOp:translate = (0, 22, 0)
+        float verticalAperture = 18
         float xformOp:rotateX = -90
+        double3 xformOp:translate = (0, 22, 0)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX"]
     }
 }
+

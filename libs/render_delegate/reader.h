@@ -22,7 +22,6 @@
 #include "pxr/imaging/hd/retainedDataSource.h"
 #include "pxr/imaging/hdsi/primTypePruningSceneIndex.h"
 #include "pxr/imaging/hdsi/sceneGlobalsSceneIndex.h"
-#include "pxr/imaging/hdsi/coordSysPrimSceneIndex.h"
 #include "pxr/imaging/hd/materialBindingsSchema.h"
 
 #endif // ENABLE_SCENE_INDEX
