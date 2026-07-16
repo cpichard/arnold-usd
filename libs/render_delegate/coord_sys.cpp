@@ -137,8 +137,29 @@ void HdArnoldCoordSys::Sync(
         // ortho_camera node and are left as a follow-up.
         if (AiNodeIs(src, str::persp_camera)) {
             AiNodeSetFlt(_node, str::fov, AiNodeGetFlt(src, str::fov));
-            const AtVector2 windowMin = AiNodeGetVec2(src, str::screen_window_min);
-            const AtVector2 windowMax = AiNodeGetVec2(src, str::screen_window_max);
+            AtVector2 windowMin = AiNodeGetVec2(src, str::screen_window_min);
+            AtVector2 windowMax = AiNodeGetVec2(src, str::screen_window_max);
+            // Arnold derives a camera's vertical field of view from the *render*
+            // frame aspect ratio (xres/yres * pixel_aspect), not from the camera's
+            // own aperture (see AiWorldToScreenMatrix). For a projection camera that
+            // must match the bound camera - as Karma does - we override the vertical
+            // screen window so the projector's own aperture ratio is used, cancelling
+            // the render aspect: yHalf = frameAspect * (vAperture / hAperture). When
+            // the render aspect already equals the aperture aspect this is a no-op.
+            const float hAperture = boundCamera->GetHorizontalAperture();
+            const float vAperture = boundCamera->GetVerticalAperture();
+            if (hAperture > AI_EPSILON && vAperture > AI_EPSILON) {
+                const AtNode* options = AiUniverseGetOptions(_renderDelegate->GetUniverse());
+                const int yres = AiNodeGetInt(options, str::yres);
+                const float frameAspect = (yres != 0)
+                    ? (static_cast<float>(AiNodeGetInt(options, str::xres)) / static_cast<float>(yres)) *
+                        AiNodeGetFlt(options, str::pixel_aspect_ratio)
+                    : 1.0f;
+                const float yCenter = 0.5f * (windowMin.y + windowMax.y);
+                const float yHalf = frameAspect * (vAperture / hAperture);
+                windowMin.y = yCenter - yHalf;
+                windowMax.y = yCenter + yHalf;
+            }
             AiNodeSetVec2(_node, str::screen_window_min, windowMin.x, windowMin.y);
             AiNodeSetVec2(_node, str::screen_window_max, windowMax.x, windowMax.y);
             AiNodeSetFlt(_node, str::near_clip, AiNodeGetFlt(src, str::near_clip));
