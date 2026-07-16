@@ -63,8 +63,10 @@ HdArnoldCoordSys::HdArnoldCoordSys(HdArnoldRenderDelegate* renderDelegate, const
 
 HdArnoldCoordSys::~HdArnoldCoordSys()
 {
-    if (_node)
+    if (_node) {
+        _renderDelegate->UnregisterCoordSysCamera(_node);
         _renderDelegate->DestroyArnoldNode(_node);
+    }
 }
 
 const HdArnoldCamera* HdArnoldCoordSys::_FindBoundCamera(HdSceneDelegate* sceneDelegate) const
@@ -137,33 +139,28 @@ void HdArnoldCoordSys::Sync(
         // ortho_camera node and are left as a follow-up.
         if (AiNodeIs(src, str::persp_camera)) {
             AiNodeSetFlt(_node, str::fov, AiNodeGetFlt(src, str::fov));
-            AtVector2 windowMin = AiNodeGetVec2(src, str::screen_window_min);
-            AtVector2 windowMax = AiNodeGetVec2(src, str::screen_window_max);
-            // Arnold derives a camera's vertical field of view from the *render*
-            // frame aspect ratio (xres/yres * pixel_aspect), not from the camera's
-            // own aperture (see AiWorldToScreenMatrix). For a projection camera that
-            // must match the bound camera - as Karma does - we override the vertical
-            // screen window so the projector's own aperture ratio is used, cancelling
-            // the render aspect: yHalf = frameAspect * (vAperture / hAperture). When
-            // the render aspect already equals the aperture aspect this is a no-op.
-            const float hAperture = boundCamera->GetHorizontalAperture();
-            const float vAperture = boundCamera->GetVerticalAperture();
-            if (hAperture > AI_EPSILON && vAperture > AI_EPSILON) {
-                const AtNode* options = AiUniverseGetOptions(_renderDelegate->GetUniverse());
-                const int yres = AiNodeGetInt(options, str::yres);
-                const float frameAspect = (yres != 0)
-                    ? (static_cast<float>(AiNodeGetInt(options, str::xres)) / static_cast<float>(yres)) *
-                        AiNodeGetFlt(options, str::pixel_aspect_ratio)
-                    : 1.0f;
-                const float yCenter = 0.5f * (windowMin.y + windowMax.y);
-                const float yHalf = frameAspect * (vAperture / hAperture);
-                windowMin.y = yCenter - yHalf;
-                windowMax.y = yCenter + yHalf;
-            }
-            AiNodeSetVec2(_node, str::screen_window_min, windowMin.x, windowMin.y);
-            AiNodeSetVec2(_node, str::screen_window_max, windowMax.x, windowMax.y);
+            const AtVector2 windowMin = AiNodeGetVec2(src, str::screen_window_min);
+            const AtVector2 windowMax = AiNodeGetVec2(src, str::screen_window_max);
             AiNodeSetFlt(_node, str::near_clip, AiNodeGetFlt(src, str::near_clip));
             AiNodeSetFlt(_node, str::far_clip, AiNodeGetFlt(src, str::far_clip));
+            // Arnold derives a camera's vertical fov from the *render* frame aspect
+            // ratio, not the camera's own aperture (see AiWorldToScreenMatrix), which
+            // would tie the projection to the render camera aspect / resolution.
+            // Karma instead uses the projector's own aperture. We cancel Arnold's
+            // render aspect by driving the vertical screen window from the aperture
+            // ratio: yHalf = frameAspect * (vAperture / hAperture). frameAspect is
+            // only known once the render resolution is set, so we register the camera
+            // with its aperture ratio and let the render delegate recompute the
+            // vertical window per render (UpdateCoordSysCameraProjections); the value
+            // seeded here is just a resolution-independent baseline. We keep the
+            // source horizontal window (any aperture offset) and its vertical centre.
+            const float hAperture = boundCamera->GetHorizontalAperture();
+            const float vAperture = boundCamera->GetVerticalAperture();
+            const float ratio = (hAperture > AI_EPSILON) ? (vAperture / hAperture) : 1.0f;
+            const float yCenter = 0.5f * (windowMin.y + windowMax.y);
+            AiNodeSetVec2(_node, str::screen_window_min, windowMin.x, yCenter - ratio);
+            AiNodeSetVec2(_node, str::screen_window_max, windowMax.x, yCenter + ratio);
+            _renderDelegate->RegisterCoordSysCamera(_node, ratio);
         }
     } else if (bits & DirtyTransform) {
         // No resolvable camera (e.g. the legacy scene delegate exposes the

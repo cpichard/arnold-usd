@@ -1456,6 +1456,39 @@ AtString HdArnoldRenderDelegate::GetLocalNodeName(const AtString& name) const
 
 AtUniverse* HdArnoldRenderDelegate::GetUniverse() const { return _universe; }
 
+void HdArnoldRenderDelegate::UpdateCoordSysCameraProjections()
+{
+    std::lock_guard<std::mutex> guard(_coordSysCamerasMutex);
+    if (_coordSysCameras.empty())
+        return;
+    const int yres = AiNodeGetInt(_options, str::yres);
+    if (yres == 0)
+        return;
+    // Arnold bakes the render frame aspect ratio into every camera's vertical fov
+    // (see AiWorldToScreenMatrix). We cancel it per coordSys projector by setting
+    // its vertical screen window to frameAspect * (vAperture/hAperture), using the
+    // resolution actually being rendered - so the projection follows the projector's
+    // own aperture and is independent of the render camera aspect / resolution.
+    const float frameAspect =
+        (static_cast<float>(AiNodeGetInt(_options, str::xres)) / static_cast<float>(yres)) *
+        AiNodeGetFlt(_options, str::pixel_aspect_ratio);
+    for (const auto& entry : _coordSysCameras) {
+        AtNode* camera = entry.first;
+        const float yHalf = frameAspect * entry.second;
+        const AtVector2 windowMin = AiNodeGetVec2(camera, str::screen_window_min);
+        const AtVector2 windowMax = AiNodeGetVec2(camera, str::screen_window_max);
+        const float yCenter = 0.5f * (windowMin.y + windowMax.y);
+        const float newMinY = yCenter - yHalf;
+        const float newMaxY = yCenter + yHalf;
+        // Only write when the value actually changes: this is called every render,
+        // and re-setting the parameter would dirty the camera and restart rendering.
+        if (!GfIsClose(windowMin.y, newMinY, AI_EPSILON) || !GfIsClose(windowMax.y, newMaxY, AI_EPSILON)) {
+            AiNodeSetVec2(camera, str::screen_window_min, windowMin.x, newMinY);
+            AiNodeSetVec2(camera, str::screen_window_max, windowMax.x, newMaxY);
+        }
+    }
+}
+
 AtRenderSession* HdArnoldRenderDelegate::GetRenderSession() const
 {
     if (_renderDelegateOwnsUniverse) {
