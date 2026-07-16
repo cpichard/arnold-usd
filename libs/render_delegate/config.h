@@ -197,6 +197,11 @@ struct HdArnoldConfig {
     ///
     bool auto_generate_tx;
 
+    /// Flip coordinate-system camera projections vertically to match Houdini/Karma.
+    /// Enabled by default; set HDARNOLD_coordsys_flip_v=0 for Arnold's native orientation.
+    ///
+    bool coordsys_flip_v;
+
 
 private:
     /// Constructor for reading the values from the environment variables.

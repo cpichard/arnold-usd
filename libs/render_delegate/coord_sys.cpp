@@ -15,6 +15,7 @@
 #include "coord_sys.h"
 
 #include "camera.h"
+#include "config.h"
 #include "render_param.h"
 #include "utils.h"
 
@@ -25,6 +26,31 @@
 #include <pxr/imaging/hd/sceneDelegate.h>
 
 PXR_NAMESPACE_OPEN_SCOPE
+
+namespace {
+
+// Flip the coordinate-system camera's up axis (row 1 of the camera-to-world
+// matrix). This inverts camera-space Y, and because the projective spaces
+// (.NDC/.screen/.raster) are derived from the camera, their V axis flips with
+// it, so every named space flips consistently. Used to match Houdini/Karma's
+// projection orientation when HDARNOLD_coordsys_flip_v is enabled.
+void _FlipCoordSysMatrixV(AtNode* node)
+{
+    AtArray* matrix = AiNodeGetArray(node, str::matrix);
+    if (matrix == nullptr)
+        return;
+    const uint32_t numKeys = AiArrayGetNumKeys(matrix);
+    for (uint32_t key = 0; key < numKeys; ++key) {
+        AtMatrix m = AiArrayGetMtx(matrix, key);
+        m[1][0] = -m[1][0];
+        m[1][1] = -m[1][1];
+        m[1][2] = -m[1][2];
+        m[1][3] = -m[1][3];
+        AiArraySetMtx(matrix, key, m);
+    }
+}
+
+} // namespace
 
 HdArnoldCoordSys::HdArnoldCoordSys(HdArnoldRenderDelegate* renderDelegate, const SdfPath& id)
     : HdCoordSys(id), _renderDelegate(renderDelegate)
@@ -103,6 +129,8 @@ void HdArnoldCoordSys::Sync(
         param.Interrupt();
         if (AtArray* matrix = AiNodeGetArray(src, str::matrix)) {
             AiNodeSetArray(_node, str::matrix, AiArrayCopy(matrix));
+            if (HdArnoldConfig::GetInstance().coordsys_flip_v)
+                _FlipCoordSysMatrixV(_node);
         }
         // We create a persp_camera, so we can only mirror the frustum of a
         // perspective source. Orthographic projection cameras would need an
@@ -125,6 +153,8 @@ void HdArnoldCoordSys::Sync(
         // Arnold does not apply the parent procedural matrix to cameras, so we
         // fold it in here, matching HdArnoldCamera.
         ArnoldUsdApplyParentMatrix(_node, _renderDelegate->GetProceduralParent());
+        if (HdArnoldConfig::GetInstance().coordsys_flip_v)
+            _FlipCoordSysMatrixV(_node);
     }
 }
 

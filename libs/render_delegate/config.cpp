@@ -116,6 +116,12 @@ TF_DEFINE_ENV_SETTING(HDARNOLD_asset_searchpath, "", "Asset search path.");
 
 TF_DEFINE_ENV_SETTING(HDARNOLD_auto_generate_tx, true, "Auto-generate Textures to TX");
 
+TF_DEFINE_ENV_SETTING(
+    HDARNOLD_coordsys_flip_v, true,
+    "Flip coordinate-system camera projections vertically (V axis). Enabled by default "
+    "to match the projection orientation of Houdini/Karma; set to 0 for Arnold's native "
+    "orientation.");
+
 HdArnoldConfig::HdArnoldConfig()
 {
     bucket_size = std::max(1, TfGetEnvSetting(HDARNOLD_bucket_size));
@@ -158,6 +164,7 @@ HdArnoldConfig::HdArnoldConfig()
 #endif
     osl_includepath = TfGetEnvSetting(HDARNOLD_osl_includepath);
     auto_generate_tx = TfGetEnvSetting(HDARNOLD_auto_generate_tx);
+    coordsys_flip_v = TfGetEnvSetting(HDARNOLD_coordsys_flip_v);
 }
 
 const HdArnoldConfig& HdArnoldConfig::GetInstance() { return TfSingleton<HdArnoldConfig>::GetInstance(); }
