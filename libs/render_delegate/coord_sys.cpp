@@ -91,7 +91,7 @@ HdArnoldCoordSys::~HdArnoldCoordSys()
 
 const HdArnoldCamera* HdArnoldCoordSys::_FindBoundCamera(HdSceneDelegate* sceneDelegate) const
 {
-    const HdRenderIndex& renderIndex = sceneDelegate->GetRenderIndex();
+    HdRenderIndex& renderIndex = sceneDelegate->GetRenderIndex();
     // When the coordinate system is populated through the scene index, the sprim
     // id identifies a coordSys prim parented under the bound prim itself. The
     // scene-delegate emulation reports it as a prim path with the property
