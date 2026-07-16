@@ -22,6 +22,7 @@
 #include <common_utils.h>
 #include <constant_strings.h>
 
+#include <pxr/base/gf/matrix4d.h>
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/sceneDelegate.h>
 
@@ -90,22 +91,41 @@ HdArnoldCoordSys::~HdArnoldCoordSys()
 
 const HdArnoldCamera* HdArnoldCoordSys::_FindBoundCamera(HdSceneDelegate* sceneDelegate) const
 {
+    const HdRenderIndex& renderIndex = sceneDelegate->GetRenderIndex();
     // When the coordinate system is populated through the scene index, the sprim
     // id identifies a coordSys prim parented under the bound prim itself. The
     // scene-delegate emulation reports it as a prim path with the property
     // separators rewritten, e.g. </grid/proj_cam/__coordSys_map_proj>, so the
     // bound camera is the *parent* path. Try both the prim path and its parent
-    // and return the first that resolves to a camera. When populated through the
-    // legacy delegate the id is a property path on the geometry carrying the
-    // binding, where neither resolves to a camera and the caller falls back to
-    // the coordinate system's own transform.
-    const HdRenderIndex& renderIndex = sceneDelegate->GetRenderIndex();
+    // and return the first that resolves to a camera.
     for (const SdfPath& path : {GetId().GetPrimPath(), GetId().GetParentPath()}) {
         const HdSprim* sprim = renderIndex.GetSprim(HdPrimTypeTokens->camera, path);
         if (const auto* camera = dynamic_cast<const HdArnoldCamera*>(sprim))
             return camera;
     }
-    return nullptr;
+    // When populated through the legacy delegate the sprim id is the binding
+    // relationship path on the geometry (e.g. </grid.coordSys:map_proj:binding>),
+    // which does not encode the bound camera path. The delegate does, however,
+    // back the coordSys sprim with the *target* camera prim and reports that
+    // camera's world transform for GetId(). We recover the camera by matching
+    // that transform against the camera sprims, so we can mirror its frustum too:
+    // the projective .NDC/.screen/.raster spaces need it (the plain .camera space
+    // needs only the matrix, which the transform-only fallback already provided).
+    const GfMatrix4d xf = sceneDelegate->GetTransform(GetId());
+    const HdArnoldCamera* match = nullptr;
+    for (const SdfPath& cameraId :
+         renderIndex.GetSprimSubtree(HdPrimTypeTokens->camera, SdfPath::AbsoluteRootPath())) {
+        const auto* camera =
+            dynamic_cast<const HdArnoldCamera*>(renderIndex.GetSprim(HdPrimTypeTokens->camera, cameraId));
+        if (camera == nullptr || !GfIsClose(sceneDelegate->GetTransform(cameraId), xf, AI_EPSILON))
+            continue;
+        // Two cameras sharing this transform would be ambiguous; fall back to the
+        // transform-only node rather than mirror the wrong frustum.
+        if (match != nullptr)
+            return nullptr;
+        match = camera;
+    }
+    return match;
 }
 
 void HdArnoldCoordSys::Sync(
