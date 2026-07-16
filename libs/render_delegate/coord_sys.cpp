@@ -25,9 +25,26 @@
 #include <pxr/imaging/hd/renderIndex.h>
 #include <pxr/imaging/hd/sceneDelegate.h>
 
+#include <algorithm>
+#include <string>
+
 PXR_NAMESPACE_OPEN_SCOPE
 
 namespace {
+
+// Build a unique, lookup-safe Arnold node name for a coordinate-system camera
+// from its sprim id. Several prims may each bind a coordinate system of the
+// *same* name (e.g. "map_proj") to *different* cameras; naming the node after
+// the (unique) sprim id rather than the coordinate-system name keeps the Arnold
+// camera nodes distinct. The id may carry property separators ('.'/':') which
+// would confuse Arnold's "<name>.<suffix>" space parsing, so we replace them.
+std::string _CoordSysCameraNodeName(const SdfPath& id)
+{
+    std::string name = id.GetString();
+    std::replace_if(
+        name.begin(), name.end(), [](char c) { return c == '.' || c == ':'; }, '_');
+    return name;
+}
 
 // Flip the coordinate-system camera's up axis (row 1 of the camera-to-world
 // matrix). This inverts camera-space Y, and because the projective spaces
@@ -105,11 +122,20 @@ void HdArnoldCoordSys::Sync(
     // .raster" by looking up a camera node named <name>, so the node must carry
     // that name rather than the sprim's full SdfPath.
     if (_node == nullptr) {
-        const TfToken name = GetName();
-        if (name.IsEmpty())
+        // Wait until the coordinate system name is known (the parent Sync sets
+        // it); an empty name means the sprim is not fully populated yet.
+        if (GetName().IsEmpty())
             return;
         param.Interrupt();
-        _node = _renderDelegate->CreateArnoldNode(str::persp_camera, AtString(name.GetText()));
+        // Name the camera node uniquely from the sprim id rather than the
+        // coordinate-system name. Arnold resolves named coordinate spaces
+        // globally by camera node name (AiNodeLookUpByName), so several prims
+        // binding a coordinate system of the same name to different cameras
+        // would otherwise collide on a single node. Each rprim rewrites its
+        // material's "space" input to this unique node name (see HdArnoldMesh
+        // and HdArnoldNodeGraph::RemapCoordSysSpaces).
+        _node = _renderDelegate->CreateArnoldNode(
+            str::persp_camera, AtString(_CoordSysCameraNodeName(GetId()).c_str()));
     }
 
     // Cameras sync before coordSys sprims (see _SupportedSprimTypes), so when the

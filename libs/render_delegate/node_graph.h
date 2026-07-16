@@ -179,6 +179,20 @@ public:
     /// way to update the render
     HDARNOLD_API
     void SetImagerGraph(bool b) {_imagerGraph = b;}
+
+    /// Rewrite the coordinate-system name in this graph's shader "space" inputs
+    /// to the uniquely-named Arnold camera node bound to a specific rprim.
+    ///
+    /// Arnold resolves named coordinate spaces globally by camera node name, so
+    /// distinct bindings of the same coordinate-system name (e.g. "map_proj")
+    /// must point at distinctly-named cameras. A material does not know which
+    /// camera a coordinate-system name maps to for a given rprim, so the rprim
+    /// supplies the mapping (coordinate-system name -> unique camera node name)
+    /// here after translation.
+    ///
+    /// @param remap Map from coordinate-system name to unique camera node name.
+    HDARNOLD_API
+    void RemapCoordSysSpaces(const std::unordered_map<std::string, std::string>& remap);
     
 protected:
 

@@ -44,6 +44,9 @@
 #include "instancer.h"
 #include "node_graph.h"
 
+#include <string>
+#include <unordered_map>
+
 PXR_NAMESPACE_OPEN_SCOPE
 
 // clang-format off
@@ -635,12 +638,21 @@ void HdArnoldMesh::Sync(
             auto* coordSysArray = AiArrayAllocate(coordSysBindings->size(), 1, AI_TYPE_NODE);
             auto** coordSysNodes = static_cast<AtNode**>(AiArrayMap(coordSysArray));
             size_t count = 0;
+            // Map each bound coordinate-system name to its unique Arnold camera
+            // node name. Arnold resolves named coordinate spaces globally by
+            // camera node name, so distinct rprims binding a coordinate system
+            // of the same name (e.g. "map_proj") to different cameras must each
+            // rewrite their material's "space" input to their own camera.
+            std::unordered_map<std::string, std::string> coordSysRemap;
             for (const auto& coordSysId : *coordSysBindings) {
                 const HdSprim* sprim = sceneDelegate->GetRenderIndex().GetSprim(
                     HdPrimTypeTokens->coordSys, coordSysId);
                 const auto* coordSys = dynamic_cast<const HdArnoldCoordSys*>(sprim);
-                if (coordSys)
+                if (coordSys && coordSys->GetArnoldNode() != nullptr) {
                     coordSysNodes[count++] = coordSys->GetArnoldNode();
+                    coordSysRemap[coordSys->GetName().GetString()] =
+                        AiNodeGetName(coordSys->GetArnoldNode());
+                }
             }
             AiArrayUnmap(coordSysArray);
             if (count < coordSysBindings->size())
@@ -648,6 +660,19 @@ void HdArnoldMesh::Sync(
             if (AiNodeLookUpUserParameter(node, str::coord_sys) == nullptr)
                 AiNodeDeclare(node, str::coord_sys, str::constantArrayNode);
             AiNodeSetArray(node, str::coord_sys, coordSysArray);
+
+            // Rewrite the "space" inputs of this rprim's materials so their
+            // coordinate-system name resolves to the unique camera bound here.
+            if (!coordSysRemap.empty()) {
+                auto remapMaterial = [&](const SdfPath& materialId) {
+                    if (auto* nodeGraph = HdArnoldNodeGraph::GetNodeGraph(
+                            sceneDelegate->GetRenderIndex(), materialId, _renderDelegate))
+                        nodeGraph->RemapCoordSysSpaces(coordSysRemap);
+                };
+                remapMaterial(sceneDelegate->GetMaterialId(id));
+                for (const auto& subsetMaterial : _subsets)
+                    remapMaterial(subsetMaterial);
+            }
         } else {
             AiNodeResetParameter(node, str::coord_sys);
         }

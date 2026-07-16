@@ -1,11 +1,19 @@
 #usda 1.0
 (
     defaultPrim = "grid"
-    doc = """Exercises Hydra CoordSys support: a texture is projected onto a
-             ground plane from the coordinate system 'map_proj', which is bound
-             to a tilted projector camera. The MaterialX position node reads its
-             coordinates in the 'map_proj' space; arnold-usd rewrites that to the
-             bound camera's OSL space so the projection follows the camera.
+    doc = """Exercises Hydra CoordSys support with *multiple coordinate systems
+             sharing a name*. Four grids each reference the same </grid>
+             template, so each has its own projector camera and its own copy of
+             the material overriding the projection space. All four coordinate
+             systems are named 'map_proj' but are bound to different cameras.
+
+             Arnold resolves named coordinate spaces globally by camera node
+             name, so a naive translation collides all four on a single camera
+             and three grids project from the wrong projector. arnold-usd names
+             each coord-sys camera uniquely and rewrites every material's
+             'space' input to the camera bound to its rprim, so each grid
+             projects from its own camera. The four grids additionally exercise
+             the .camera / .NDC / .raster / .screen projective spaces.
 
              See #32 / ARNOLD-13221."""
     metersPerUnit = 1
@@ -13,6 +21,7 @@
 )
 
 def Xform "grid" (
+    active = false
     prepend apiSchemas = ["CoordSysAPI:map_proj"]
     kind = "component"
 )
@@ -33,47 +42,14 @@ def Xform "grid" (
 
     def Camera "proj_cam"
     {
-        float4[] clippingPlanes.timeSamples = {
-            1: [],
-        }
         float2 clippingRange = (0.1, 10000)
-        float2 clippingRange.timeSamples = {
-            1: (0.1, 10000),
-        }
         float focalLength = 24
-        float focalLength.timeSamples = {
-            1: 24,
-        }
-        float focusDistance.timeSamples = {
-            1: 0.910822,
-        }
-        float fStop.timeSamples = {
-            1: 0,
-        }
         float horizontalAperture = 36
-        float horizontalAperture.timeSamples = {
-            1: 36,
-        }
-        float horizontalApertureOffset.timeSamples = {
-            1: 0,
-        }
         token projection = "perspective"
-        token projection.timeSamples = {
-            1: "perspective",
-        }
         float verticalAperture = 27
-        float verticalAperture.timeSamples = {
-            1: 27,
-        }
-        float verticalApertureOffset.timeSamples = {
-            1: 0,
-        }
         float xformOp:rotateX = -56
-        matrix4d xformOp:transform.timeSamples = {
-            1: ( (0.45165629697855614, -4.440892098500626e-16, -0.8921920137501895, 0), (-0.8056142649835146, 0.42972327873219796, -0.40782785556006496, 0), (0.38339567740741387, 0.9029606324284851, 0.19408722479766805, 0), (5.578332355740621, 11.791942779267115, 2.641486272343134, 1) ),
-        }
         double3 xformOp:translate = (0, 12, 8)
-        uniform token[] xformOpOrder = ["xformOp:transform"]
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX"]
     }
 
     def Scope "mtl"
@@ -140,6 +116,86 @@ def Xform "grid" (
     }
 }
 
+def "grid_0" (
+    active = true
+    append references = </grid>
+)
+{
+    double3 xformOp:translate = (0, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    over "mtl"
+    {
+        over "projected"
+        {
+            over "position"
+            {
+                string inputs:space = "map_proj"
+            }
+        }
+    }
+}
+
+def "grid_1" (
+    active = true
+    append references = </grid>
+)
+{
+    double3 xformOp:translate = (12, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    over "mtl"
+    {
+        over "projected"
+        {
+            over "position"
+            {
+                string inputs:space = "map_proj:ndc"
+            }
+        }
+    }
+}
+
+def "grid_2" (
+    active = true
+    append references = </grid>
+)
+{
+    double3 xformOp:translate = (0, 0, 12)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    over "mtl"
+    {
+        over "projected"
+        {
+            over "position"
+            {
+                string inputs:space = "map_proj:raster"
+            }
+        }
+    }
+}
+
+def "grid_3" (
+    active = true
+    append references = </grid>
+)
+{
+    double3 xformOp:translate = (12, 0, 12)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    over "mtl"
+    {
+        over "projected"
+        {
+            over "position"
+            {
+                string inputs:space = "map_proj:screen"
+            }
+        }
+    }
+}
+
 def Scope "Cameras"
 {
     def Camera "renderCamera"
@@ -150,8 +206,7 @@ def Scope "Cameras"
         token projection = "perspective"
         float verticalAperture = 18
         float xformOp:rotateX = -90
-        double3 xformOp:translate = (0, 22, 0)
+        double3 xformOp:translate = (6, 36, 6)
         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX"]
     }
 }
-

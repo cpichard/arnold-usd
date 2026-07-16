@@ -283,6 +283,36 @@ void HdArnoldNodeGraph::Sync(HdSceneDelegate* sceneDelegate, HdRenderParam* rend
     _wasSyncedOnce = true;
 }
 
+void HdArnoldNodeGraph::RemapCoordSysSpaces(const std::unordered_map<std::string, std::string>& remap)
+{
+    if (remap.empty())
+        return;
+    for (const auto& entry : _nodes) {
+        AtNode* node = entry.second;
+        if (node == nullptr || !AiNodeIs(node, str::osl))
+            continue;
+        // MaterialX geometric nodes (ND_position_vector3, ...) expose their
+        // coordinate space as the OSL string input "param_shader_space" (see
+        // ReadMtlxOslShader). It has already been rewritten to Arnold's dotted
+        // "<name>.<suffix>" form; replace the "<name>" part (the coordinate
+        // system name) with the uniquely-named camera node bound to the rprim.
+        if (AiNodeEntryLookUpParameter(AiNodeGetNodeEntry(node), str::param_shader_space) == nullptr)
+            continue;
+        const std::string value = AiNodeGetStr(node, str::param_shader_space).c_str();
+        if (value.empty())
+            continue;
+        const size_t dot = value.find('.');
+        const std::string name = value.substr(0, dot);
+        const auto it = remap.find(name);
+        if (it == remap.end())
+            continue;
+        // Keep the suffix (".camera"/".NDC"/...); a value with no suffix (an
+        // unexpected plain name) defaults to the camera space.
+        const std::string suffix = (dot == std::string::npos) ? std::string(".camera") : value.substr(dot);
+        AiNodeSetStr(node, str::param_shader_space, AtString((it->second + suffix).c_str()));
+    }
+}
+
 HdDirtyBits HdArnoldNodeGraph::GetInitialDirtyBitsMask() const { return HdMaterial::DirtyResource; }
 
 AtNode* HdArnoldNodeGraph::GetCachedSurfaceShader() const
