@@ -53,13 +53,30 @@ public:
 
     AtNode* GetArnoldNode() const { return _node; }
 
+    /// The camera node dedicated to the ".NDC" space, or nullptr when the NDC
+    /// correction is disabled. Arnold's NDC convention is Y-opposite to its
+    /// screen/raster, so (when HDARNOLD_coordsys_flip_ndc_v is enabled) the ".NDC"
+    /// space is resolved through this separately-flipped camera while
+    /// ".camera"/".screen"/".raster" keep using GetArnoldNode(). Callers rewrite
+    /// the ".NDC"-suffixed material "space" inputs to this node's name.
+    AtNode* GetArnoldNdcNode() const { return _ndcNode; }
+
 private:
     /// Returns the HdArnoldCamera the coordinate system is bound to, or nullptr
     /// when the bound prim is not a camera (or cannot be resolved).
     const HdArnoldCamera* _FindBoundCamera(HdSceneDelegate* sceneDelegate) const;
 
+    /// Mirror the resolved bound camera (matrix + frustum) into dst, optionally
+    /// flipping the V axis, and register it for per-render aspect correction.
+    void _MirrorCamera(AtNode* dst, AtNode* src, const HdArnoldCamera* boundCamera, bool flipV);
+
+    /// Fall back to the coordinate system's own world transform (no frustum),
+    /// optionally flipping the V axis. Used when no bound camera resolves.
+    void _MirrorTransform(AtNode* dst, HdSceneDelegate* sceneDelegate, bool flipV);
+
     HdArnoldRenderDelegate* _renderDelegate;
     AtNode* _node = nullptr;
+    AtNode* _ndcNode = nullptr;
 };
 
 PXR_NAMESPACE_CLOSE_SCOPE

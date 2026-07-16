@@ -190,9 +190,17 @@ public:
     /// supplies the mapping (coordinate-system name -> unique camera node name)
     /// here after translation.
     ///
-    /// @param remap Map from coordinate-system name to unique camera node name.
+    /// The ".NDC" space is optionally routed to a separate, extra-flipped camera
+    /// node (see HdArnoldCoordSys::GetArnoldNdcNode); leave CoordSysTarget::ndcNode
+    /// empty to keep ".NDC" on the primary node.
+    ///
+    /// @param remap Map from coordinate-system name to its camera node names.
+    struct CoordSysTarget {
+        std::string node;    ///< Camera node for .camera/.screen/.raster (and .NDC when ndcNode is empty).
+        std::string ndcNode; ///< Camera node for .NDC; empty to use `node`.
+    };
     HDARNOLD_API
-    void RemapCoordSysSpaces(const std::unordered_map<std::string, std::string>& remap);
+    void RemapCoordSysSpaces(const std::unordered_map<std::string, CoordSysTarget>& remap);
     
 protected:
 

@@ -117,10 +117,18 @@ TF_DEFINE_ENV_SETTING(HDARNOLD_asset_searchpath, "", "Asset search path.");
 TF_DEFINE_ENV_SETTING(HDARNOLD_auto_generate_tx, true, "Auto-generate Textures to TX");
 
 TF_DEFINE_ENV_SETTING(
-    HDARNOLD_coordsys_flip_v, true,
-    "Flip coordinate-system camera projections vertically (V axis). Enabled by default "
-    "to match the projection orientation of Houdini/Karma; set to 0 for Arnold's native "
-    "orientation.");
+    HDARNOLD_coordsys_flip_v, false,
+    "Flip the coordinate-system camera projections vertically (V axis) for every named "
+    "space (.camera/.NDC/.screen/.raster). Disabled by default; set to 1 for the opposite "
+    "orientation. See HDARNOLD_coordsys_flip_ndc_v for the NDC-only correction.");
+
+TF_DEFINE_ENV_SETTING(
+    HDARNOLD_coordsys_flip_ndc_v, true,
+    "Give the .NDC space an extra vertical (V axis) flip relative to the other named "
+    "spaces. Arnold's NDC convention is Y-opposite to its screen/raster, so this is "
+    "enabled by default to make the NDC projection agree with the others (and Karma). "
+    "The .NDC space is routed to a dedicated flipped camera node, leaving .camera/"
+    ".screen/.raster untouched. Set to 0 for Arnold's native NDC orientation.");
 
 HdArnoldConfig::HdArnoldConfig()
 {
@@ -165,6 +173,7 @@ HdArnoldConfig::HdArnoldConfig()
     osl_includepath = TfGetEnvSetting(HDARNOLD_osl_includepath);
     auto_generate_tx = TfGetEnvSetting(HDARNOLD_auto_generate_tx);
     coordsys_flip_v = TfGetEnvSetting(HDARNOLD_coordsys_flip_v);
+    coordsys_flip_ndc_v = TfGetEnvSetting(HDARNOLD_coordsys_flip_ndc_v);
 }
 
 const HdArnoldConfig& HdArnoldConfig::GetInstance() { return TfSingleton<HdArnoldConfig>::GetInstance(); }

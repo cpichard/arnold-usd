@@ -643,15 +643,21 @@ void HdArnoldMesh::Sync(
             // camera node name, so distinct rprims binding a coordinate system
             // of the same name (e.g. "map_proj") to different cameras must each
             // rewrite their material's "space" input to their own camera.
-            std::unordered_map<std::string, std::string> coordSysRemap;
+            std::unordered_map<std::string, HdArnoldNodeGraph::CoordSysTarget> coordSysRemap;
             for (const auto& coordSysId : *coordSysBindings) {
                 const HdSprim* sprim = sceneDelegate->GetRenderIndex().GetSprim(
                     HdPrimTypeTokens->coordSys, coordSysId);
                 const auto* coordSys = dynamic_cast<const HdArnoldCoordSys*>(sprim);
                 if (coordSys && coordSys->GetArnoldNode() != nullptr) {
                     coordSysNodes[count++] = coordSys->GetArnoldNode();
-                    coordSysRemap[coordSys->GetName().GetString()] =
-                        AiNodeGetName(coordSys->GetArnoldNode());
+                    // Arnold's NDC is Y-opposite to its screen/raster; when the
+                    // coordinate system created a dedicated (extra-flipped) NDC
+                    // camera, route this rprim's ".NDC" space to it.
+                    HdArnoldNodeGraph::CoordSysTarget target;
+                    target.node = AiNodeGetName(coordSys->GetArnoldNode());
+                    if (AtNode* ndcNode = coordSys->GetArnoldNdcNode())
+                        target.ndcNode = AiNodeGetName(ndcNode);
+                    coordSysRemap[coordSys->GetName().GetString()] = std::move(target);
                 }
             }
             AiArrayUnmap(coordSysArray);

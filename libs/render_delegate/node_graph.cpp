@@ -283,7 +283,7 @@ void HdArnoldNodeGraph::Sync(HdSceneDelegate* sceneDelegate, HdRenderParam* rend
     _wasSyncedOnce = true;
 }
 
-void HdArnoldNodeGraph::RemapCoordSysSpaces(const std::unordered_map<std::string, std::string>& remap)
+void HdArnoldNodeGraph::RemapCoordSysSpaces(const std::unordered_map<std::string, CoordSysTarget>& remap)
 {
     if (remap.empty())
         return;
@@ -309,7 +309,12 @@ void HdArnoldNodeGraph::RemapCoordSysSpaces(const std::unordered_map<std::string
         // Keep the suffix (".camera"/".NDC"/...); a value with no suffix (an
         // unexpected plain name) defaults to the camera space.
         const std::string suffix = (dot == std::string::npos) ? std::string(".camera") : value.substr(dot);
-        AiNodeSetStr(node, str::param_shader_space, AtString((it->second + suffix).c_str()));
+        // Arnold's NDC is Y-opposite to its screen/raster, so the ".NDC" space is
+        // resolved through a separate extra-flipped camera when one was created;
+        // the other spaces stay on the primary node.
+        const std::string& target =
+            (suffix == ".NDC" && !it->second.ndcNode.empty()) ? it->second.ndcNode : it->second.node;
+        AiNodeSetStr(node, str::param_shader_space, AtString((target + suffix).c_str()));
     }
 }
 
