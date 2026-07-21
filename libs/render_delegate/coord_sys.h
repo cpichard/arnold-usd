@@ -21,6 +21,7 @@
 #include <pxr/imaging/hd/coordSys.h>
 
 #include "render_delegate.h"
+#include "render_param.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -66,8 +67,20 @@ private:
     /// when the bound prim is not a camera (or cannot be resolved).
     const HdArnoldCamera* _FindBoundCamera(HdSceneDelegate* sceneDelegate) const;
 
+    /// Return an Arnold camera node named @p nodeName of the given @p cameraType
+    /// (persp_camera / ortho_camera). Reuses @p existing when it already has that
+    /// type; otherwise creates the node, and when @p existing is a node of a
+    /// different type recreates it in place (redirecting references and destroying
+    /// the old one) so a coordinate system bound to an orthographic camera resolves
+    /// to an ortho_camera node. Interrupts the render only when it (re)creates.
+    AtNode* _EnsureNode(
+        HdArnoldRenderParamInterrupt& param, AtNode* existing, const AtString& cameraType,
+        const std::string& nodeName);
+
     /// Mirror the resolved bound camera (matrix + frustum) into dst, optionally
-    /// flipping the V axis, and register it for per-render aspect correction.
+    /// flipping the V axis, and register it for per-render aspect correction. The
+    /// frustum is mirrored for both perspective and orthographic source cameras;
+    /// dst must already be of the matching Arnold camera type (see _EnsureNode).
     void _MirrorCamera(AtNode* dst, AtNode* src, const HdArnoldCamera* boundCamera, bool flipV);
 
     /// Fall back to the coordinate system's own world transform (no frustum),

@@ -1,0 +1,210 @@
+#usda 1.0
+(
+    defaultPrim = "grid"
+    doc = """Exercises Hydra CoordSys support with *orthographic* projector
+             cameras. This is the ortho counterpart of test_13221: four grids
+             each reference the same </grid> template, so each has its own
+             projector camera and its own copy of the material overriding the
+             projection space. All four coordinate systems are named 'map_proj'
+             but are bound to different cameras.
+
+             Each projector is an orthographic camera. arnold-usd must create an
+             ortho_camera node (rather than the default persp_camera) for the
+             coordinate system and mirror its screen window (world-unit extents,
+             no fov) so the parallel .camera / .NDC / .raster / .screen spaces
+             resolve correctly, including the render-aspect cancellation.
+
+             See #32 / ARNOLD-13221."""
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "grid" (
+    active = false
+    prepend apiSchemas = ["CoordSysAPI:map_proj"]
+    kind = "component"
+)
+{
+    rel coordSys:map_proj:binding = </grid/proj_cam>
+
+    def Mesh "mesh" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        float3[] extent = [(-5, 0, -5), (5, 0, 5)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        rel material:binding = </grid/mtl/projected>
+        point3f[] points = [(-5, 0, 5), (5, 0, 5), (5, 0, -5), (-5, 0, -5)]
+        uniform token subdivisionScheme = "none"
+    }
+
+    def Camera "proj_cam"
+    {
+        float2 clippingRange = (0.1, 10000)
+        float horizontalAperture = 120
+        token projection = "orthographic"
+        float verticalAperture = 90
+        float xformOp:rotateX = -56
+        double3 xformOp:translate = (0, 12, 8)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX"]
+    }
+
+    def Scope "mtl"
+    {
+        def Material "projected"
+        {
+            token outputs:mtlx:surface.connect = </grid/mtl/projected/surface.outputs:out>
+
+            def Shader "surface"
+            {
+                uniform token info:id = "ND_surface_unlit"
+                float inputs:emission = 1
+                color3f inputs:emission_color.connect = </grid/mtl/projected/rgb.outputs:out>
+                token outputs:out
+            }
+
+            def Shader "rgb"
+            {
+                uniform token info:id = "ND_combine3_color3"
+                float inputs:in1.connect = </grid/mtl/projected/range_u.outputs:out>
+                float inputs:in2.connect = </grid/mtl/projected/range_v.outputs:out>
+                float inputs:in3 = 0
+                color3f outputs:out
+            }
+
+            def Shader "range_u"
+            {
+                uniform token info:id = "ND_range_float"
+                float inputs:in.connect = </grid/mtl/projected/separate.outputs:outx>
+                float inputs:inhigh = 5
+                float inputs:inlow = -5
+                float inputs:outhigh = 1
+                float inputs:outlow = 0
+                float outputs:out
+            }
+
+            def Shader "range_v"
+            {
+                uniform token info:id = "ND_range_float"
+                float inputs:in.connect = </grid/mtl/projected/separate.outputs:outy>
+                float inputs:inhigh = 5
+                float inputs:inlow = -5
+                float inputs:outhigh = 1
+                float inputs:outlow = 0
+                float outputs:out
+            }
+
+            def Shader "separate"
+            {
+                uniform token info:id = "ND_separate3_vector3"
+                vector3f inputs:in.connect = </grid/mtl/projected/position.outputs:out>
+                float outputs:outx
+                float outputs:outy
+                float outputs:outz
+            }
+
+            def Shader "position"
+            {
+                uniform token info:id = "ND_position_vector3"
+                string inputs:space = "map_proj"
+                vector3f outputs:out
+            }
+        }
+    }
+}
+
+def "grid_0" (
+    active = true
+    append references = </grid>
+)
+{
+    double3 xformOp:translate = (0, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    over "mtl"
+    {
+        over "projected"
+        {
+            over "position"
+            {
+                string inputs:space = "map_proj"
+            }
+        }
+    }
+}
+
+def "grid_1" (
+    active = true
+    append references = </grid>
+)
+{
+    double3 xformOp:translate = (12, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    over "mtl"
+    {
+        over "projected"
+        {
+            over "position"
+            {
+                string inputs:space = "map_proj:ndc"
+            }
+        }
+    }
+}
+
+def "grid_2" (
+    active = true
+    append references = </grid>
+)
+{
+    double3 xformOp:translate = (0, 0, 12)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    over "mtl"
+    {
+        over "projected"
+        {
+            over "position"
+            {
+                string inputs:space = "map_proj:raster"
+            }
+        }
+    }
+}
+
+def "grid_3" (
+    active = true
+    append references = </grid>
+)
+{
+    double3 xformOp:translate = (12, 0, 12)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    over "mtl"
+    {
+        over "projected"
+        {
+            over "position"
+            {
+                string inputs:space = "map_proj:screen"
+            }
+        }
+    }
+}
+
+def Scope "Cameras"
+{
+    def Camera "renderCamera"
+    {
+        float2 clippingRange = (0.1, 10000)
+        float focalLength = 24
+        float horizontalAperture = 24
+        token projection = "perspective"
+        float verticalAperture = 18
+        float xformOp:rotateX = -90
+        double3 xformOp:translate = (6, 36, 6)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX"]
+    }
+}

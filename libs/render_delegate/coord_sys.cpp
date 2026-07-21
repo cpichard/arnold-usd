@@ -128,6 +128,32 @@ const HdArnoldCamera* HdArnoldCoordSys::_FindBoundCamera(HdSceneDelegate* sceneD
     return match;
 }
 
+AtNode* HdArnoldCoordSys::_EnsureNode(
+    HdArnoldRenderParamInterrupt& param, AtNode* existing, const AtString& cameraType,
+    const std::string& nodeName)
+{
+    if (existing != nullptr && AiNodeIs(existing, cameraType))
+        return existing;
+    param.Interrupt();
+    if (existing != nullptr) {
+        // The projection type changed (e.g. the first Sync defaulted to
+        // perspective and the bound camera has now resolved to orthographic).
+        // Recreate the node in place, following HdArnoldCamera::Sync: free the
+        // name so it can be reused, redirect any references (the mesh coord_sys
+        // user-data array holds the node pointer) with AiNodeReplace, then
+        // destroy the old node. Unregister first so we do not leave a dangling
+        // entry in the per-render aspect-correction map.
+        _renderDelegate->UnregisterCoordSysCamera(existing);
+        AiNodeSetStr(existing, str::name, AtString());
+    }
+    AtNode* node = _renderDelegate->CreateArnoldNode(cameraType, AtString(nodeName.c_str()));
+    if (existing != nullptr) {
+        AiNodeReplace(existing, node, false);
+        _renderDelegate->DestroyArnoldNode(existing);
+    }
+    return node;
+}
+
 void HdArnoldCoordSys::Sync(
     HdSceneDelegate* sceneDelegate, HdRenderParam* renderParam, HdDirtyBits* dirtyBits)
 {
@@ -139,48 +165,49 @@ void HdArnoldCoordSys::Sync(
 
     HdArnoldRenderParamInterrupt param(renderParam);
 
-    // Lazily create the camera node now that the coordinate system name is
-    // known. Arnold's OSL render services resolve "<name>.camera/.NDC/.screen/
-    // .raster" by looking up a camera node named <name>, so the node must carry
-    // that name rather than the sprim's full SdfPath.
     const HdArnoldConfig& config = HdArnoldConfig::GetInstance();
 
-    if (_node == nullptr) {
-        // Wait until the coordinate system name is known (the parent Sync sets
-        // it); an empty name means the sprim is not fully populated yet.
-        if (GetName().IsEmpty())
-            return;
-        param.Interrupt();
-        // Name the camera node uniquely from the sprim id rather than the
-        // coordinate-system name. Arnold resolves named coordinate spaces
-        // globally by camera node name (AiNodeLookUpByName), so several prims
-        // binding a coordinate system of the same name to different cameras
-        // would otherwise collide on a single node. Each rprim rewrites its
-        // material's "space" input to this unique node name (see HdArnoldMesh
-        // and HdArnoldNodeGraph::RemapCoordSysSpaces).
-        const std::string nodeName = _CoordSysCameraNodeName(GetId());
-        _node = _renderDelegate->CreateArnoldNode(str::persp_camera, AtString(nodeName.c_str()));
-        // Arnold's NDC convention is Y-opposite to its screen/raster, so a single
-        // camera cannot make all named spaces agree with the others (and Karma):
-        // any flip that fixes NDC breaks the rest, and vice versa. When the NDC
-        // correction is enabled we resolve the ".NDC" space through a *separate*
-        // camera node that carries an extra V flip, leaving the other spaces on
-        // _node. The ".NDC"-suffixed material inputs are routed here by name.
-        if (config.coordsys_flip_ndc_v) {
-            const std::string ndcName = nodeName + "_ndc";
-            _ndcNode = _renderDelegate->CreateArnoldNode(str::persp_camera, AtString(ndcName.c_str()));
-        }
-    }
+    // Wait until the coordinate system name is known (the parent Sync sets it);
+    // an empty name means the sprim is not fully populated yet. Arnold's OSL
+    // render services resolve "<name>.camera/.NDC/.screen/.raster" by looking up
+    // a camera node named after the space, so the node must carry that name.
+    if (GetName().IsEmpty())
+        return;
+
+    // Resolve the bound camera first: its projection type decides whether the
+    // coordinate-system node(s) must be a persp_camera or an ortho_camera.
+    // Cameras sync before coordSys sprims (see _SupportedSprimTypes), so when the
+    // coordinate system resolves to a camera its Arnold node is already configured.
+    const HdArnoldCamera* boundCamera = _FindBoundCamera(sceneDelegate);
+    AtNode* src = boundCamera ? boundCamera->GetCamera() : nullptr;
+
+    // Match the coordinate-system node type to the bound camera. When no camera
+    // resolves we keep perspective: the transform-only fallback carries no frustum
+    // so the projection type is immaterial, and it matches the historical default.
+    const AtString cameraType =
+        (src != nullptr && AiNodeIs(src, str::ortho_camera)) ? str::ortho_camera : str::persp_camera;
+
+    // Name the camera node uniquely from the sprim id rather than the coordinate-
+    // system name. Arnold resolves named coordinate spaces globally by camera node
+    // name (AiNodeLookUpByName), so several prims binding a coordinate system of
+    // the same name to different cameras would otherwise collide on a single node.
+    // Each rprim rewrites its material's "space" input to this unique node name
+    // (see HdArnoldMesh and HdArnoldNodeGraph::RemapCoordSysSpaces).
+    const std::string nodeName = _CoordSysCameraNodeName(GetId());
+    _node = _EnsureNode(param, _node, cameraType, nodeName);
+    // Arnold's NDC convention is Y-opposite to its screen/raster, so a single
+    // camera cannot make all named spaces agree with the others (and Karma): any
+    // flip that fixes NDC breaks the rest, and vice versa. When the NDC correction
+    // is enabled we resolve the ".NDC" space through a *separate* camera node that
+    // carries an extra V flip, leaving the other spaces on _node. The ".NDC"-
+    // suffixed material inputs are routed here by name.
+    if (config.coordsys_flip_ndc_v)
+        _ndcNode = _EnsureNode(param, _ndcNode, cameraType, nodeName + "_ndc");
 
     // Base spaces (.camera/.NDC/.screen/.raster on _node) use coordsys_flip_v; the
     // dedicated NDC node flips once more (XOR) so its NDC is opposite the rest.
     const bool baseFlip = config.coordsys_flip_v;
     const bool ndcFlip = config.coordsys_flip_v != config.coordsys_flip_ndc_v;
-
-    // Cameras sync before coordSys sprims (see _SupportedSprimTypes), so when the
-    // coordinate system resolves to a camera its Arnold node is already configured.
-    const HdArnoldCamera* boundCamera = _FindBoundCamera(sceneDelegate);
-    AtNode* src = boundCamera ? boundCamera->GetCamera() : nullptr;
 
     if (src != nullptr) {
         // The coordinate system is bound to a camera we can resolve. Mirror that
@@ -215,31 +242,44 @@ void HdArnoldCoordSys::_MirrorCamera(
         if (flipV)
             _FlipCoordSysMatrixV(dst);
     }
-    // We create a persp_camera, so we can only mirror the frustum of a perspective
-    // source. Orthographic projection cameras would need an ortho_camera node and
-    // are left as a follow-up.
-    if (!AiNodeIs(src, str::persp_camera))
-        return;
-    AiNodeSetFlt(dst, str::fov, AiNodeGetFlt(src, str::fov));
-    const AtVector2 windowMin = AiNodeGetVec2(src, str::screen_window_min);
-    const AtVector2 windowMax = AiNodeGetVec2(src, str::screen_window_max);
     AiNodeSetFlt(dst, str::near_clip, AiNodeGetFlt(src, str::near_clip));
     AiNodeSetFlt(dst, str::far_clip, AiNodeGetFlt(src, str::far_clip));
-    // Arnold derives a camera's vertical fov from the *render* frame aspect ratio,
-    // not the camera's own aperture (see AiWorldToScreenMatrix), which would tie the
-    // projection to the render camera aspect / resolution. Karma instead uses the
-    // projector's own aperture. We cancel Arnold's render aspect by driving the
-    // vertical screen window from the aperture ratio: yHalf = frameAspect *
-    // (vAperture / hAperture). frameAspect is only known once the render resolution
-    // is set, so we register the camera with its aperture ratio and let the render
-    // delegate recompute the vertical window per render
-    // (UpdateCoordSysCameraProjections); the value seeded here is just a
-    // resolution-independent baseline. We keep the source horizontal window (any
-    // aperture offset) and its vertical centre.
-    const float hAperture = boundCamera->GetHorizontalAperture();
-    const float vAperture = boundCamera->GetVerticalAperture();
-    const float ratio = (hAperture > AI_EPSILON) ? (vAperture / hAperture) : 1.0f;
+
+    const AtVector2 windowMin = AiNodeGetVec2(src, str::screen_window_min);
+    const AtVector2 windowMax = AiNodeGetVec2(src, str::screen_window_max);
     const float yCenter = 0.5f * (windowMin.y + windowMax.y);
+
+    // Arnold bakes the *render* frame aspect ratio into every camera's vertical
+    // mapping (see AiWorldToScreenMatrix), which would tie the projection to the
+    // render camera aspect / resolution. Karma instead uses the projector's own
+    // aperture. We cancel Arnold's render aspect by driving the vertical screen
+    // window as yHalf = frameAspect * ratio, where `ratio` is the projector's
+    // native vertical extent. frameAspect is only known once the render resolution
+    // is set, so we register the camera with `ratio` and let the render delegate
+    // recompute the vertical window per render (UpdateCoordSysCameraProjections);
+    // the value seeded here is just a resolution-independent baseline. In both
+    // cases we keep the source horizontal window (any aperture offset) and the
+    // vertical centre, and only the vertical half-extent is aspect-corrected.
+    float ratio = 1.0f;
+    if (AiNodeIs(src, str::ortho_camera)) {
+        // Orthographic projector: the screen window is in world units and defines
+        // the projected rectangle directly (no fov). The native vertical extent is
+        // the source window's vertical half-extent; the horizontal extent is kept
+        // as-is so the effective horizontal world extent stays constant while the
+        // vertical is aspect-corrected to match it, exactly as for perspective.
+        ratio = 0.5f * (windowMax.y - windowMin.y);
+    } else if (AiNodeIs(src, str::persp_camera)) {
+        // Perspective projector: the source window is fov-normalised (±1), so the
+        // native vertical extent is the aperture ratio (verticalAperture /
+        // horizontalAperture).
+        AiNodeSetFlt(dst, str::fov, AiNodeGetFlt(src, str::fov));
+        const float hAperture = boundCamera->GetHorizontalAperture();
+        const float vAperture = boundCamera->GetVerticalAperture();
+        ratio = (hAperture > AI_EPSILON) ? (vAperture / hAperture) : 1.0f;
+    } else {
+        // Unknown projection: matrix mirrored above, but we cannot mirror a frustum.
+        return;
+    }
     AiNodeSetVec2(dst, str::screen_window_min, windowMin.x, yCenter - ratio);
     AiNodeSetVec2(dst, str::screen_window_max, windowMax.x, yCenter + ratio);
     _renderDelegate->RegisterCoordSysCamera(dst, ratio);

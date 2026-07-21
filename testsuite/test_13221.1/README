@@ -1,0 +1,10 @@
+Add support for Hydra coordSys feature with *orthographic* projection cameras
+
+Ortho variant of test_13221: the projector cameras are orthographic, exercising
+the .camera / .NDC / .raster / .screen spaces through Arnold ortho_camera nodes.
+
+See #32 / ARNOLD-13221
+
+author: cyril.pichard
+
+PARAMS: {'scene':'test.usda', 'kick_params':'-c /Cameras/renderCamera'}
