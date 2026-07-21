@@ -210,6 +210,17 @@ void HdArnoldCoordSys::Sync(
     const bool ndcFlip = config.coordsys_flip_v != config.coordsys_flip_ndc_v;
 
     if (src != nullptr) {
+        // Re-sync this coordinate system whenever the bound camera changes.
+        // Hydra does not propagate a camera's dirtiness to the coordSys sprim, so
+        // without this the mirrored frustum goes stale when the camera's aperture
+        // or projection type (persp<->ortho) changes at runtime. HdArnoldCamera
+        // dirties its dependents at the end of every Sync (DirtyDependency), so we
+        // register the coordSys (source) as depending on the camera (target); the
+        // DirtyTransform bit just forces our Sync to re-run and re-mirror.
+        HdArnoldRenderDelegate::PathSetWithDirtyBits cameraDep;
+        cameraDep.insert({boundCamera->GetId(), HdCoordSys::DirtyTransform});
+        _renderDelegate->TrackDependencies(GetId(), cameraDep);
+
         // The coordinate system is bound to a camera we can resolve. Mirror that
         // camera into our node(s): copy its world matrix (which already folds in
         // the parent procedural matrix) and, for the projective spaces, its frustum.
