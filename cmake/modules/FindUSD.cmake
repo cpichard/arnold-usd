@@ -163,6 +163,17 @@ if (pxr_FOUND)
         endif ()
     endif()
 
+    # Vanilla pxrConfig.cmake (built from the plain upstream tag, as opposed to the arnold
+    # branch's patched one) names the real monolithic shared target "usd_m", even though the
+    # library file on disk is libusd_ms.{so,dylib}. This codebase links "usd_ms" instead
+    # (translator, usdgenschema, turntable), following the arnold branch's naming. Alias it
+    # so both names resolve to the same real library.
+    if (NOT BUILD_WITH_USD_STATIC AND USD_MONOLITHIC_BUILD AND NOT TARGET usd_ms AND TARGET usd_m)
+        message(STATUS "usd_ms shared target not defined in pxrConfig.cmake, aliasing it to usd_m")
+        add_library(usd_ms INTERFACE IMPORTED)
+        set_target_properties(usd_ms PROPERTIES INTERFACE_LINK_LIBRARIES usd_m)
+    endif()
+
     if (BUILD_WITH_USD_STATIC AND USD_MONOLITHIC_BUILD)
         # For the static build, we want to split the static libs and the shared ones
         # as the static will be linked as whole archive

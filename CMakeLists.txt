@@ -9,6 +9,12 @@ list(APPEND CMAKE_MODULE_PATH "${USD_LOCATION}/lib/cmake/" 0)
 # Define the project and build options
 include(options)
 
+# Some USD builds (e.g. shared/monolithic with GL enabled) export a "garch" target whose
+# link interface references OpenGL::GL, but their pxrConfig.cmake never calls
+# find_dependency(OpenGL). It has to be found before find_package(USD) or that fails with
+# "The link interface of target garch contains OpenGL::GL but the target was not found".
+find_package(OpenGL)
+
 # Global required packagse
 find_package(USD REQUIRED)
 find_package(Arnold REQUIRED)
@@ -75,6 +81,32 @@ if (NOT BUILD_WITH_USD_STATIC)
         install(FILES plugInfo.json
             DESTINATION "${PREFIX_BUNDLE}")
     endif()
+
+    # A shared/monolithic USD is not embedded in what we build, so it (and Arnold) have to
+    # be located at runtime. Generate a setup.sh next to this install for that, resolving
+    # everything belonging to the install itself relative to the script's own location so
+    # it stays relocatable; only the external Arnold and USD locations are baked in.
+    set(ARNOLD_USD_SETUP_PLUGIN_DIRS_LIST "")
+    if (BUILD_BUNDLE)
+        list(APPEND ARNOLD_USD_SETUP_PLUGIN_DIRS_LIST "\${_arnold_usd_root}/${PREFIX_BUNDLE}")
+    elseif (BUILD_RENDER_DELEGATE OR BUILD_NDR_PLUGIN OR BUILD_USD_IMAGING_PLUGIN OR BUILD_SCENE_INDEX_PLUGIN)
+        list(APPEND ARNOLD_USD_SETUP_PLUGIN_DIRS_LIST "\${_arnold_usd_root}/${PREFIX_PLUGINS}")
+    endif ()
+    if (BUILD_SCHEMAS)
+        list(APPEND ARNOLD_USD_SETUP_PLUGIN_DIRS_LIST "\${_arnold_usd_root}/${PREFIX_SCHEMA}")
+    endif ()
+    list(JOIN ARNOLD_USD_SETUP_PLUGIN_DIRS_LIST ":" ARNOLD_USD_SETUP_PLUGIN_DIRS)
+
+    set(ARNOLD_USD_SETUP_PROCEDURAL_DIR "")
+    if (BUILD_PROCEDURAL)
+        set(ARNOLD_USD_SETUP_PROCEDURAL_DIR "\${_arnold_usd_root}/${PREFIX_PROCEDURAL}")
+    endif ()
+
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/cmake/templates/setup.sh.in"
+        "${CMAKE_BINARY_DIR}/setup.sh"
+        @ONLY)
+    install(PROGRAMS "${CMAKE_BINARY_DIR}/setup.sh" DESTINATION .)
 endif()
 
 install(FILES LICENSE.md DESTINATION .)
