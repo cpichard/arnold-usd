@@ -13,6 +13,7 @@ include(options)
 # link interface references OpenGL::GL, but their pxrConfig.cmake never calls
 # find_dependency(OpenGL). It has to be found before find_package(USD) or that fails with
 # "The link interface of target garch contains OpenGL::GL but the target was not found".
+# OpenGL must be found before importing pxrTargets (garch links OpenGL::GL)
 find_package(OpenGL)
 
 # Global required packagse
